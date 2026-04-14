@@ -47,34 +47,43 @@ export async function GET(request: NextRequest) {
     }
 
     // Filter by city (case-insensitive)
-    let filtered = (data || []).filter((item: Record<string, unknown>) => {
-      const station = item.stations as Record<string, unknown> | null;
+    let filtered = (data || []).filter((item: any) => {
+      const station = item.stations as any;
       if (!station) return false;
-      const stationCidade = (station.cidade as string || '').toLowerCase();
+      
+      // Handle case where supabase returns an array for joins (sometimes happens based on foreign keys)
+      const st = Array.isArray(station) ? station[0] : station;
+      if (!st) return false;
+      
+      const stationCidade = (st.cidade as string || '').toLowerCase();
       return stationCidade.includes(cidade.toLowerCase());
     });
 
     // Filter by fuel type if specified
     if (tipo && tipo !== 'Todos') {
-      filtered = filtered.filter((item: Record<string, unknown>) => item.tipo_combustivel === tipo);
+      filtered = filtered.filter((item: any) => item.tipo_combustivel === tipo);
     }
 
     // Get latest price per station per fuel type
-    const latestPrices = new Map<string, Record<string, unknown>>();
+    const latestPrices = new Map<string, any>();
     for (const item of filtered) {
-      const station = item.stations as Record<string, unknown>;
-      const key = `${(station as Record<string, unknown>).id}-${item.tipo_combustivel}`;
+      const station = item.stations as any;
+      const st = Array.isArray(station) ? station[0] : station;
+      if (!st) continue;
+      
+      const key = `${st.id}-${item.tipo_combustivel}`;
+      // replace the item with adjusted station
+      const newItem = { ...item, stations: st };
+      
       if (!latestPrices.has(key)) {
-        latestPrices.set(key, item);
+        latestPrices.set(key, newItem);
       }
     }
 
     const result = Array.from(latestPrices.values());
 
     // Sort by price (cheapest first)
-    result.sort((a: Record<string, unknown>, b: Record<string, unknown>) => 
-      (a.preco as number) - (b.preco as number)
-    );
+    result.sort((a: any, b: any) => a.preco - b.preco);
 
     return NextResponse.json({ data: result, total: result.length });
   } catch (err) {
