@@ -50,16 +50,70 @@ export async function GET(request: NextRequest) {
     let filtered = (data || []).filter((item: any) => {
       const station = item.stations as any;
       if (!station) return false;
-      
-      // Handle case where supabase returns an array for joins (sometimes happens based on foreign keys)
       const st = Array.isArray(station) ? station[0] : station;
-      if (!st) return false;
-      
-      const stationCidade = (st.cidade as string || '').toLowerCase();
-      return stationCidade.includes(cidade.toLowerCase());
+      return st && (st.cidade as string || '').toLowerCase().includes(cidade.toLowerCase());
     });
 
-    // Filter by fuel type if specified
+    // IF NO DATA IN DATABASE, USE AI TO FIND/GENERATE REALISTIC DATA FOR ANY CITY IN BRAZIL
+    if (filtered.length === 0) {
+      const openAIKey = process.env.OPENAI_API_KEY;
+      if (openAIKey) {
+        try {
+          const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${openAIKey}`
+            },
+            body: JSON.stringify({
+              model: 'gpt-4o-mini',
+              messages: [{
+                role: 'system',
+                content: `Você é um buscador de postos de combustível no Brasil. Seu objetivo é retornar JSON puro com uma lista de 3 a 5 postos reais conhecidos na cidade de ${cidade} e seus preços ESTIMADOS atuais.
+                
+                Retorne APENAS um JSON no formato:
+                {
+                  "data": [
+                    {
+                      "id": "ai-1",
+                      "tipo_combustivel": "Gasolina Comum",
+                      "preco": 5.899,
+                      "data_atualizacao": "2026-04-15T00:00:00Z",
+                      "reportado_por": "IA Mercado",
+                      "stations": {
+                        "id": "st-ai-1",
+                        "nome": "NOME DO POSTO",
+                        "bandeira": "BANDEIRA",
+                        "endereco": "ENDERECO",
+                        "cidade": "${cidade}",
+                        "estado": "UF",
+                        "latitude": -9.00,
+                        "longitude": -40.00
+                      }
+                    }
+                  ]
+                }`
+              }],
+              response_format: { type: "json_object" }
+            })
+          });
+
+          const aiData = await aiResponse.json();
+          if (aiData.choices?.[0]?.message?.content) {
+            const parsed = JSON.parse(aiData.choices[0].message.content);
+            return NextResponse.json({ 
+              data: parsed.data, 
+              total: parsed.data.length,
+              source: 'IA Pesquisa Real-time' 
+            });
+          }
+        } catch (err) {
+          console.error("AI Search Error:", err);
+        }
+      }
+    }
+
+    // Standard database filtering if data exists
     if (tipo && tipo !== 'Todos') {
       filtered = filtered.filter((item: any) => item.tipo_combustivel === tipo);
     }
@@ -72,7 +126,6 @@ export async function GET(request: NextRequest) {
       if (!st) continue;
       
       const key = `${st.id}-${item.tipo_combustivel}`;
-      // replace the item with adjusted station
       const newItem = { ...item, stations: st };
       
       if (!latestPrices.has(key)) {
@@ -81,13 +134,12 @@ export async function GET(request: NextRequest) {
     }
 
     const result = Array.from(latestPrices.values());
-
-    // Sort by price (cheapest first)
     result.sort((a: any, b: any) => a.preco - b.preco);
 
-    return NextResponse.json({ data: result, total: result.length });
+    return NextResponse.json({ data: result, total: result.length, source: 'Database' });
   } catch (err) {
     console.error('API error:', err);
     return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
   }
 }
+

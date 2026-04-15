@@ -80,6 +80,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [searched, setSearched] = useState(false);
+  const [source, setSource] = useState<'Database' | 'IA Pesquisa Real-time' | ''>('');
   const [showReport, setShowReport] = useState(false);
   const [showAI, setShowAI] = useState(false);
   const [aiAnalysis, setAiAnalysis] = useState('');
@@ -108,6 +109,7 @@ export default function Home() {
       const res = await fetch(`/api/stations?${params}`);
       const json = await res.json();
       setPrices(json.data || []);
+      setSource(json.source || 'Database');
     } catch {
       showToast('Erro ao buscar postos');
     } finally {
@@ -453,10 +455,15 @@ export default function Home() {
           </div>
         ) : (
           <div className="stations-container">
-            <div className="section-title">
-              🏆 Ranking de Preços — {cidade}
-            </div>
-            {groupedStations.map((group, index) => {
+          <div className="section-title flex justify-between items-center">
+            <span>🏆 Ranking de Preços — {cidade}</span>
+            {source === 'IA Pesquisa Real-time' && (
+              <span className="text-[10px] bg-purple-500/20 text-purple-400 px-2 py-1 rounded-full border border-purple-500/30 animate-pulse">
+                ✨ Gerado por IA
+              </span>
+            )}
+          </div>
+          {groupedStations.map((group, index) => {
               const isCheapest = index === 0;
               return (
                 <div
