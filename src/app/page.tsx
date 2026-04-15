@@ -377,16 +377,29 @@ export default function Home() {
             <div className="empty-icon">🔍</div>
             <div className="empty-title">Busque sua cidade</div>
             <div className="empty-text">
-              Digite o nome da sua cidade ou use o GPS para encontrar os postos com melhor preço perto de você.
+              Ex: <strong>Petrolina</strong>, <strong>São Paulo</strong>, <strong>Rio de Janeiro</strong>...
+              <br/><br/>
+              Ou use o GPS para encontrar os postos com melhor preço perto de você.
             </div>
           </div>
         ) : groupedStations.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">😕</div>
-            <div className="empty-title">Nenhum posto encontrado</div>
-            <div className="empty-text">
-              Não encontramos postos em &quot;{cidade}&quot;. Tente outra cidade ou seja o primeiro a reportar preços!
+            <div className="empty-icon">🤖</div>
+            <div className="empty-title">Nenhum posto no banco de dados</div>
+            <div className="empty-text mb-6">
+              Ainda não temos postos cadastrados fisicamente em &quot;{cidade}&quot;...
             </div>
+            
+            <button 
+              className="px-6 py-3 rounded-xl font-bold bg-purple-600 text-white shadow-lg shadow-purple-900/40 border border-purple-400/30 flex items-center gap-2 animate-bounce"
+              onClick={() => { setActiveTab('ai'); handleAIAnalysis(); }}
+            >
+              <span>🔍</span> Pedir para IA Pesquisar Online
+            </button>
+            
+            <p className="mt-6 text-xs text-gray-500 max-w-[250px]">
+              Nossa IA pode analisar o mercado e te dar uma estimativa de preços e postos famosos desta região.
+            </p>
           </div>
         ) : activeTab === 'map' ? (
           <div className="px-5">
