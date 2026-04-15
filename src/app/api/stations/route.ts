@@ -21,7 +21,7 @@ export async function GET(request: NextRequest) {
 
     const prompt = `Liste postos e preços de combustíveis (Gasolina/Etanol) para ${cidade}. Retorne somente JSON: {"data": [{"station_info": {"nome": "N", "bandeira": "B", "endereco": "E", "latitude": -9, "longitude": -40, "ticket_log": "Sim"}, "prices": [{"tipo": "Gasolina Comum", "preco": 6.80, "data": "2026-04-15"}]}]}`;
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
     
     const response = await fetch(geminiUrl, {
       method: 'POST',
