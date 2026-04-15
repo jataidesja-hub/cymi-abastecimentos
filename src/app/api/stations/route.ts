@@ -21,12 +21,20 @@ export async function GET(request: NextRequest) {
   const isDemoCity = cidade.toLowerCase().includes('petrolina') || cidade.toLowerCase().includes('juazeiro');
   const demoData = [
     {
-      "id": "ai-demo-1", "tipo_combustivel": "Gasolina Comum", "preco": 6.899, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado (Ref)",
-      "stations": { "id": "st-demo-1", "nome": "Posto Shell - Monsenhor", "bandeira": "SHELL", "endereco": "Av. Monsenhor Ângelo Sampaio, 100", "cidade": cidade, "estado": "PE", "latitude": -9.38, "longitude": -40.50 }
+      "id": "demo-1", "tipo_combustivel": "Gasolina Comum", "preco": 6.899, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
+      "ticket_log": "Sim", "stations": { "id": "st1", "nome": "Posto Shell - Monsenhor", "bandeira": "SHELL", "endereco": "Av. Monsenhor Ângelo Sampaio, 100", "cidade": cidade, "estado": "PE", "latitude": -9.38, "longitude": -40.50 }
     },
     {
-      "id": "ai-demo-2", "tipo_combustivel": "Etanol", "preco": 5.190, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado (Ref)",
-      "stations": { "id": "st-demo-1", "nome": "Posto Shell - Monsenhor", "bandeira": "SHELL", "endereco": "Av. Monsenhor Ângelo Sampaio, 100", "cidade": cidade, "estado": "PE", "latitude": -9.38, "longitude": -40.50 }
+      "id": "demo-2", "tipo_combustivel": "Etanol", "preco": 5.190, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
+      "ticket_log": "Sim", "stations": { "id": "st1", "nome": "Posto Shell - Monsenhor", "bandeira": "SHELL", "endereco": "Av. Monsenhor Ângelo Sampaio, 100", "cidade": cidade, "estado": "PE", "latitude": -9.38, "longitude": -40.50 }
+    },
+    {
+      "id": "demo-3", "tipo_combustivel": "Diesel S10", "preco": 6.090, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
+      "ticket_log": "Sim", "stations": { "id": "st1", "nome": "Posto Shell - Monsenhor", "bandeira": "SHELL", "endereco": "Av. Monsenhor Ângelo Sampaio, 100", "cidade": cidade, "estado": "PE", "latitude": -9.38, "longitude": -40.50 }
+    },
+    {
+      "id": "demo-4", "tipo_combustivel": "Gasolina Comum", "preco": 6.690, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
+      "ticket_log": "Não", "stations": { "id": "st2", "nome": "Posto Ipiranga Orla", "bandeira": "IPIRANGA", "endereco": "Orla de Juazeiro", "cidade": cidade, "estado": "BA", "latitude": -9.41, "longitude": -40.51 }
     }
   ];
 
