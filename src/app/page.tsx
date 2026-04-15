@@ -176,27 +176,27 @@ export default function Home() {
     );
   };
 
-  const handleAIAnalysis = async () => {
-    if (!cidade.trim()) {
-      showToast('Busque uma cidade primeiro');
-      return;
-    }
-    setShowAI(true);
+  const generateAnalysis = useCallback(async () => {
+    if (!cidade || prices.length === 0) return;
     setAiLoading(true);
     try {
       const res = await fetch('/api/ai-analysis', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ cidade }),
+        body: JSON.stringify({ 
+          cidade: cidade, 
+          prices: prices,
+          userLocation: userLocation 
+        }),
       });
       const data = await res.json();
-      setAiAnalysis(data.analysis || 'Sem dados para análise');
+      setAiAnalysis(data.analysis);
     } catch {
-      setAiAnalysis('Erro ao gerar análise. Tente novamente.');
+      setAiAnalysis('Erro ao conectar com o especialista IA.');
     } finally {
       setAiLoading(false);
     }
-  };
+  }, [cidade, prices, userLocation]);
 
   const handleReport = async () => {
     if (!reportStation || !reportPrice) {
@@ -265,10 +265,12 @@ export default function Home() {
     return map;
   }, [prices]);
 
-  // Stats
-  const totalStations = groupedStations.length;
-  const totalFuelTypes = new Set(prices.map((p) => p.tipo_combustivel)).size;
-  const cheapestPrice = prices.length > 0 ? Math.min(...prices.map((p) => p.preco)) : 0;
+  const stats = {
+    totalPostos: Array.from(new Set(prices.map(p => p.stations.id))).length,
+    tipos: Array.from(new Set(prices.map(p => p.tipo_combustivel))).length,
+    menorPreco: prices.length > 0 ? Math.min(...prices.map(p => p.preco)) : 0,
+    menorTipo: prices.length > 0 ? prices.reduce((prev, curr) => prev.preco < curr.preco ? prev : curr).tipo_combustivel : ''
+  };
 
   // Map center
   const mapProps = useMemo(() => {
@@ -348,12 +350,16 @@ export default function Home() {
             <div className="stat-label">Postos</div>
           </div>
           <div className="stat-card">
-            <div className="stat-value">{totalFuelTypes}</div>
+            <div className="stat-value">{stats.tipos}</div>
             <div className="stat-label">Tipos</div>
           </div>
           <div className="stat-card">
-            <div className="stat-value">R${cheapestPrice.toFixed(2)}</div>
-            <div className="stat-label">Menor</div>
+            <div className="stat-value text-green-400">
+              R${stats.menorPreco.toFixed(2)}
+            </div>
+            <div className="stat-label">
+              MENOR ({stats.menorTipo})
+            </div>
           </div>
         </div>
       )}

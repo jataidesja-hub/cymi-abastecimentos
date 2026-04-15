@@ -7,40 +7,42 @@ const supabase = createClient(
 );
 
 export async function POST(request: NextRequest) {
-  try {
-    const { cidade } = await request.json();
+    const { cidade, prices, userLocation } = await request.json();
 
     if (!cidade) {
       return NextResponse.json({ error: 'Cidade é obrigatória' }, { status: 400 });
     }
 
-    // Fetch all prices for the city
-    const { data: allPrices, error } = await supabase
-      .from('fuel_prices')
-      .select(`
-        tipo_combustivel,
-        preco,
-        data_atualizacao,
-        stations (
-          nome,
-          bandeira,
-          cidade
-        )
-      `)
-      .order('data_atualizacao', { ascending: false });
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+       return NextResponse.json({ analysis: "Configuração de IA pendente." });
     }
 
-    // Filter by city
-    const cityPrices = (allPrices || []).filter((item: Record<string, unknown>) => {
-      const station = item.stations as Record<string, unknown> | null;
-      const st = Array.isArray(station) ? station[0] : station;
-      return st && (st.cidade as string || '').toLowerCase().includes(cidade.toLowerCase());
-    });
+    // Context formatting for prompt
+    const pricesList = (prices || []).map((p: any) => 
+      `- ${p.stations.nome} (${p.stations.bandeira}): ${p.tipo_combustivel} R$ ${p.preco} (Lat: ${p.stations.latitude}, Lon: ${p.stations.longitude})`
+    ).join('\n');
 
-    const geminiKey = process.env.GEMINI_API_KEY;
+    const locationContext = userLocation 
+      ? `O usuário está em: Lat ${userLocation.lat}, Lon ${userLocation.lng}`
+      : "Localização do usuário não disponível.";
+
+    const aiPrompt = `ATUE COMO CONSULTOR DE ELITE EM LOGÍSTICA DE FROTAS.
+    Analise os seguintes dados de postos em ${cidade} para uma empresa que busca o melhor custo-benefício:
+    
+    DADOS ATUAIS (Preços e Localização):
+    ${pricesList}
+    
+    CONTEXTO DO USUÁRIO:
+    ${locationContext}
+    
+    SUA TAREFA - GERE UM RELATÓRIO COMPLETO:
+    1. CLASSIFICAÇÃO DE QUALIDADE: Identifique quais são postos de BANDEIRA BRANCA (mais baratos, maior risco) e quais são de QUALIDADE/BANDEIRA (Shell, Ipiranga, BR - mais confiáveis).
+    2. ESTUDO DE DESLOCAMENTO: Se a localização do usuário estiver disponível, calcule (mentalmente/estimando) se vale a pena se deslocar para o posto mais barato. Considere o custo do combustível gasto no trajeto.
+    3. RECOMENDAÇÃO MASTER: Escolha o vencedor unindo Preço + Qualidade + Localização. Seja específico sobre qual posto e qual preço você está falando.
+    4. FORMATAÇÃO: Use Tabela Markdown se necessário, use títulos, negritos e emojis. Nada de fragmentos, quero uma análise densa e profissional.`;
+
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
     if (!geminiKey) {
        console.error("ERRO: GEMINI_API_KEY ausente na análise");
        return NextResponse.json({ analysis: "Aviso: Configuração de IA pendente (Chave ausente)." });
