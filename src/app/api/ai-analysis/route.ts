@@ -36,41 +36,52 @@ export async function POST(request: NextRequest) {
     // Filter by city
     const cityPrices = (allPrices || []).filter((item: Record<string, unknown>) => {
       const station = item.stations as Record<string, unknown> | null;
-      return station && (station.cidade as string || '').toLowerCase().includes(cidade.toLowerCase());
+      const st = Array.isArray(station) ? station[0] : station;
+      return st && (st.cidade as string || '').toLowerCase().includes(cidade.toLowerCase());
     });
-
-    if (cityPrices.length === 0) {
-      return NextResponse.json({
-        analysis: `Ainda não temos dados suficientes para ${cidade}. Que tal ser o primeiro a reportar preços na sua região? 🚗`
-      });
-    }
-
-    // Prepare clear text summary of the prices to send to OpenAI
-    const fuelStats: Record<string, any[]> = {};
-    for (const item of cityPrices) {
-      const tipo = item.tipo_combustivel as string;
-      const station = item.stations as any;
-      if (!fuelStats[tipo]) fuelStats[tipo] = [];
-      fuelStats[tipo].push({ preco: item.preco, posto: station.nome });
-    }
-
-    let summaryText = `Preços em ${cidade}:\n`;
-    for (const [tipo, prices] of Object.entries(fuelStats)) {
-      const sorted = prices.sort((a, b) => a.preco - b.preco);
-      const min = sorted[0];
-      const max = sorted[sorted.length - 1];
-      summaryText += `- ${tipo}: Varia de R$ ${min.preco} no '${min.posto}' até R$ ${max.preco} no '${max.posto}'.\n`;
-    }
 
     const openAIKey = process.env.OPENAI_API_KEY;
     if (!openAIKey) {
-       return NextResponse.json({ analysis: "Aviso: Chave OpenAI não configurada. A análise é manual." });
+       return NextResponse.json({ analysis: "Aviso: Chave OpenAI não configurada." });
     }
 
-    const aiPrompt = `Você é um assistente financeiro automotivo ajudando um usuário do aplicativo "Combustível Barato" a economizar combustível. Baseado nos dados de mercado da cidade de ${cidade} abaixo, gere um pequeno resumo informativo (máximo 4 parágrafos) formatado em Markdown, com dicas claras de que postos buscar, qual tipo de combustível pode ser melhor. Lembre da regra de 70% quando aplicável para Etanol e Gasolina. Evite rodeios, seja muito prestativo e simpático. Adicione emojis.
+    let aiPrompt = "";
     
-Dados:
+    if (cityPrices.length === 0) {
+      // Logic for NO DATA - Search simulation
+      aiPrompt = `O usuário está buscando preços de combustível na cidade de ${cidade}, mas nosso banco de dados local está vazio para esta região.
+      
+      Sua tarefa:
+      1. Use seu conhecimento de mercado (até sua data de corte) para estimar os preços médios de Gasolina, Etanol e Diesel em ${cidade}.
+      2. Cite pelo menos 3 postos reais/famosos que você sabe que existem em ${cidade}.
+      3. Seja muito simpático e explique que você está realizando uma "Busca em Tempo Real via IA" para ajudá-lo.
+      4. Formate em Markdown com emojis. Dê dicas de economia.
+      
+      IMPORTANTE: Diga explicitamente que os dados são estimativas baseadas em análise de inteligência de mercado por ser uma região nova no app.`;
+    } else {
+      // Prepare clear text summary for existing data
+      const fuelStats: Record<string, any[]> = {};
+      for (const item of cityPrices) {
+        const tipo = item.tipo_combustivel as string;
+        const station = item.stations as any;
+        const st = Array.isArray(station) ? station[0] : station;
+        if (!fuelStats[tipo]) fuelStats[tipo] = [];
+        fuelStats[tipo].push({ preco: item.preco, posto: st?.nome });
+      }
+
+      let summaryText = `Preços em ${cidade}:\n`;
+      for (const [tipo, prices] of Object.entries(fuelStats)) {
+        const sorted = prices.sort((a, b) => a.preco - b.preco);
+        const min = sorted[0];
+        const max = sorted[sorted.length - 1];
+        summaryText += `- ${tipo}: Varia de R$ ${min.preco} no '${min.posto}' até R$ ${max.preco} no '${max.posto}'.\n`;
+      }
+
+      aiPrompt = `Você é um assistente financeiro automotivo no app "Combustível Barato". Baseado nos dados de mercado da cidade de ${cidade} abaixo, gere um pequeno resumo informativo (máximo 4 parágrafos) formatado em Markdown, com dicas claras de que postos buscar, qual tipo de combustível pode ser melhor. Lembre da regra de 70% para Etanol/Gasolina.
+      
+Dados Reais do App:
 ${summaryText}`;
+    }
 
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
