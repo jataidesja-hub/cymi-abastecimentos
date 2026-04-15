@@ -39,22 +39,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Chave Gemini não configurada' }, { status: 401 });
     }
 
-    const prompt = `Aja como um buscador de postos de combustível no Brasil. Seu objetivo é retornar JSON puro com uma lista de 5 postos reais conhecidos na cidade de ${cidade}.
-          
-    CONTEXTO DE MERCADO ATUAL (ABRIL 2026):
-    - Preços subiram. Gasolina em Petrolina/Juazeiro está em R$ 6,80 a 7,10. Etanol R$ 5,20.
-    - Baseie sua resposta nesses patamares realistas para essa região hoje.
+    const prompt = `Atue como um analista de logística de frotas. Realize uma pesquisa sobre os preços atuais de combustíveis (Gasolina, Etanol e Diesel S10) na cidade de ${cidade}. 
+    
+    FILTRO ESPECIAL: Priorize listar postos reais que aceitam o cartão Ticket Log (Edenred).
+    
+    Diretrizes:
+    1. Verifique as médias de preços da ANP para a região (Nordeste 2026: Gasolina ~6.80-7.20, Etanol ~5.20).
+    2. Identifique pelo menos 4-5 postos reais conhecidos nessa cidade.
+    3. Para CADA posto, retorne os preços de Gasolina Comum, Etanol e Diesel S10 se disponíveis.
+    4. Indique se o posto aceita Ticket Log (Sim/Não).
     
     Retorne APENAS um JSON no formato EXATO abaixo:
     {
       "data": [
         {
-          "id": "gemini-1",
-          "tipo_combustivel": "Gasolina Comum",
-          "preco": 6.75,
-          "data_atualizacao": "2026-04-15",
-          "reportado_por": "Gemini AI",
-          "stations": { "id": "st-g-1", "nome": "NOME", "bandeira": "SHELL", "endereco": "LUGAR", "cidade": "${cidade}", "estado": "UF", "latitude": -9.1, "longitude": -40.2 }
+          "station_info": {
+            "nome": "Posto Exemplo (Shell)",
+            "bandeira": "Shell",
+            "endereco": "Rua Tal, Bairro Centro",
+            "latitude": -9.38,
+            "longitude": -40.50,
+            "ticket_log": "Sim"
+          },
+          "prices": [
+            { "tipo": "Gasolina Comum", "preco": 6.899, "data": "2026-04-15" },
+            { "tipo": "Etanol", "preco": 5.190, "data": "2026-04-15" },
+            { "tipo": "Diesel S10", "preco": 6.090, "data": "2026-04-15" }
+          ]
         }
       ]
     }`;
@@ -74,22 +85,46 @@ export async function GET(request: NextRequest) {
     const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
     
     if (!text) {
-      if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback (Gemini Fail)' });
+      if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback' });
       throw new Error("Resposta do Gemini vazia");
     }
 
     const parsed = JSON.parse(text);
-    let results = parsed.data || [];
+    const rawResults = parsed.data || [];
+
+    // Flatten results into the format expected by the frontend
+    let finalData: any[] = [];
+    rawResults.forEach((item: any) => {
+      item.prices.forEach((p: any) => {
+        finalData.push({
+          id: `${item.station_info.nome}-${p.tipo}`,
+          tipo_combustivel: p.tipo,
+          preco: p.preco,
+          data_atualizacao: p.data,
+          reportado_por: "Analista IA",
+          ticket_log: item.station_info.ticket_log,
+          stations: {
+            id: item.station_info.nome,
+            nome: item.station_info.nome,
+            bandeira: item.station_info.bandeira,
+            endereco: item.station_info.endereco,
+            cidade: cidade,
+            estado: "",
+            latitude: item.station_info.latitude,
+            longitude: item.station_info.longitude
+          }
+        });
+      });
+    });
 
     if (tipo && tipo !== 'Todos') {
-      results = results.filter((item: any) => item.tipo_combustivel === tipo);
+      finalData = finalData.filter((item: any) => item.tipo_combustivel.toLowerCase().includes(tipo.toLowerCase()));
     }
-    results.sort((a: any, b: any) => a.preco - b.preco);
-
+    
     return NextResponse.json({ 
-      data: results, 
-      total: results.length,
-      source: 'Gemini 1.5 Real-time'
+      data: finalData, 
+      total: finalData.length,
+      source: 'Analista Logística IA'
     });
 
   } catch (err: any) {

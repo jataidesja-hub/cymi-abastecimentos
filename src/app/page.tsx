@@ -27,6 +27,7 @@ interface FuelPriceItem {
   preco: number;
   data_atualizacao: string;
   reportado_por: string;
+  ticket_log?: string;
   stations: Station;
 }
 
@@ -477,7 +478,14 @@ export default function Home() {
                       {getBrandInitials(group.station.bandeira)}
                     </div>
                     <div className="station-info">
-                      <h3>{group.station.nome}</h3>
+                      <div className="flex items-center gap-2">
+                         <h3 className="m-0">{group.station.nome}</h3>
+                         {prices.find(p => p.stations.id === group.station.id)?.ticket_log === 'Sim' && (
+                            <span className="bg-blue-600 text-[10px] text-white px-2 py-0.5 rounded font-bold uppercase tracking-wider">
+                              Ticket Log
+                            </span>
+                         )}
+                      </div>
                       <div className="station-address">
                         📍 {group.station.endereco}
                       </div>
