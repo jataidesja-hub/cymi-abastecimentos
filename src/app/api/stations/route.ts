@@ -21,27 +21,48 @@ export async function GET(request: NextRequest) {
 
     const prompt = `Liste postos e preços de combustíveis (Gasolina/Etanol) para ${cidade}. Retorne somente JSON: {"data": [{"station_info": {"nome": "N", "bandeira": "B", "endereco": "E", "latitude": -9, "longitude": -40, "ticket_log": "Sim"}, "prices": [{"tipo": "Gasolina Comum", "preco": 6.80, "data": "2026-04-15"}]}]}`;
 
-    const geminiUrl = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
-    
-    const response = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        safetySettings: [
-          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-        ]
-      }),
-      signal: AbortSignal.timeout(15000)
-    });
+    // LISTA DE ENDPOINTS PARA TENTATIVA AUTOMÁTICA (Resiliência total contra 404)
+    const endpoints = [
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
+      `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${geminiKey}`
+    ];
 
-    if (!response.ok) {
-      const errorBody = await response.text();
-      console.error("[GEMINI ERROR BODY]:", errorBody);
-      throw new Error(`Gemini erro ${response.status}: ${errorBody.slice(0, 100)}`);
+    let response: Response | null = null;
+    let lastError = "";
+
+    for (const url of endpoints) {
+      try {
+        console.log(`Tentando IA via: ${url.split('models/')[1].split(':')[0]}`);
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            safetySettings: [
+              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+            ]
+          }),
+          signal: AbortSignal.timeout(10000)
+        });
+
+        if (res.ok) {
+          response = res;
+          break;
+        } else {
+          const errText = await res.text();
+          lastError = `URL ${url} falhou: ${errText}`;
+        }
+      } catch (e: any) {
+        lastError = e.message;
+      }
+    }
+
+    if (!response) {
+      throw new Error(`A IA não pôde ser ativada com sua chave. Erro final: ${lastError.slice(0, 150)}`);
     }
 
     const data = await response.json();
