@@ -40,26 +40,16 @@ export async function POST(request: NextRequest) {
       return st && (st.cidade as string || '').toLowerCase().includes(cidade.toLowerCase());
     });
 
-    const openAIKey = process.env.OPENAI_API_KEY;
-    if (!openAIKey) {
-       return NextResponse.json({ analysis: "Aviso: Chave OpenAI não configurada." });
+    const geminiKey = process.env.GEMINI_API_KEY;
+    if (!geminiKey) {
+       return NextResponse.json({ analysis: "Aviso: Chave Gemini não configurada." });
     }
 
     let aiPrompt = "";
     
     if (cityPrices.length === 0) {
-      // Logic for NO DATA - Search simulation
-      aiPrompt = `O usuário está buscando preços de combustível na cidade de ${cidade}, mas nosso banco de dados local está vazio para esta região.
-      
-      Sua tarefa:
-      1. Use seu conhecimento de mercado (até sua data de corte) para estimar os preços médios de Gasolina, Etanol e Diesel em ${cidade}.
-      2. Cite pelo menos 3 postos reais/famosos que você sabe que existem em ${cidade}.
-      3. Seja muito simpático e explique que você está realizando uma "Busca em Tempo Real via IA" para ajudá-lo.
-      4. Formate em Markdown com emojis. Dê dicas de economia.
-      
-      IMPORTANTE: Diga explicitamente que os dados são estimativas baseadas em análise de inteligência de mercado por ser uma região nova no app.`;
+      aiPrompt = `O usuário busca preços de combustível em ${cidade}. Estime os preços médios atuais de Gasolina, Etanol e Diesel lá (Nordeste 2026: Gasolina ~R$ 6.90). Cite 3 postos reais famosos. Seja simpático. Use Markdown e emojis.`;
     } else {
-      // Prepare clear text summary for existing data
       const fuelStats: Record<string, any[]> = {};
       for (const item of cityPrices) {
         const tipo = item.tipo_combustivel as string;
@@ -77,37 +67,26 @@ export async function POST(request: NextRequest) {
         summaryText += `- ${tipo}: Varia de R$ ${min.preco} no '${min.posto}' até R$ ${max.preco} no '${max.posto}'.\n`;
       }
 
-      aiPrompt = `Você é um assistente financeiro automotivo no app "Combustível Barato". Baseado nos dados de mercado da cidade de ${cidade} abaixo, gere um pequeno resumo informativo (máximo 4 parágrafos) formatado em Markdown, com dicas claras de que postos buscar, qual tipo de combustível pode ser melhor. Lembre da regra de 70% para Etanol/Gasolina.
-      
-Dados Reais do App:
-${summaryText}`;
+      aiPrompt = `Analise os preços de ${cidade} e dê dicas de economia e regra dos 70%. Markdown.\n\nDados:\n${summaryText}`;
     }
 
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
+    
+    const response = await fetch(geminiUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${openAIKey}`
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'gpt-4o-mini',
-        messages: [{ role: 'user', content: aiPrompt }],
-        temperature: 0.7
+        contents: [{ parts: [{ text: aiPrompt }] }]
       })
     });
 
     const aiData = await response.json();
-    
-    if (aiData.error) {
-      console.error(aiData.error);
-      return NextResponse.json({ analysis: "Erro na IA: " + (aiData.error.message || 'Desconhecido') });
-    }
+    const analysis = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "Análise indisponível no momento.";
 
-    const iaResponse = aiData.choices?.[0]?.message?.content || "Análise indisponível";
-
-    return NextResponse.json({ analysis: iaResponse });
-  } catch (err) {
+    return NextResponse.json({ analysis });
+  } catch (err: any) {
     console.error('AI Analysis error:', err);
     return NextResponse.json({ error: 'Erro ao gerar análise' }, { status: 500 });
   }
 }
+
