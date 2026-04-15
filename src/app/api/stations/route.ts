@@ -101,36 +101,4 @@ export async function GET(request: NextRequest) {
 
 
 
-    const aiData = await aiResponse.json();
-    
-    if (aiData.error || !aiData.choices?.[0]?.message?.content) {
-      console.error("Erro OpenAI:", aiData.error);
-      if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback' });
-      throw new Error(aiData.error?.message || "IA não respondeu");
-    }
-
-    const parsed = JSON.parse(aiData.choices[0].message.content);
-    let results = parsed.data || [];
-
-    if (tipo && tipo !== 'Todos') {
-      results = results.filter((item: any) => item.tipo_combustivel === tipo);
-    }
-
-    results.sort((a: any, b: any) => a.preco - b.preco);
-
-    return NextResponse.json({ 
-      data: results, 
-      total: results.length,
-      source: 'IA Pesquisa Real-time'
-    });
-
-  } catch (err: any) {
-    console.error('Falha geral na API:', err);
-    if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback (Erro)' });
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}
-
-
-
 
