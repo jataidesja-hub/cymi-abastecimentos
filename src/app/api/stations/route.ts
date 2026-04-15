@@ -77,6 +77,8 @@ export async function GET(request: NextRequest) {
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
     
+    console.log(`Buscando postos para: ${cidade}`);
+
     const response = await fetch(geminiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -88,15 +90,15 @@ export async function GET(request: NextRequest) {
     const data = await response.json();
     let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
     
-    // Limpeza de Markdown caso a IA retorne blocos ```json
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-    
-    if (!text) {
+    // EXTRATOR ROBUSTO DE JSON: Localiza o primeiro { e o último }
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error("Gemini não retornou JSON válido:", text);
       if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback' });
-      throw new Error("O Gemini não conseguiu retornar dados para esta cidade.");
+      throw new Error(`Não encontramos postos em ${cidade} no momento.`);
     }
 
-    const parsed = JSON.parse(text);
+    const parsed = JSON.parse(jsonMatch[0]);
     const rawResults = parsed.data || [];
 
     // Flatten results into the format expected by the frontend

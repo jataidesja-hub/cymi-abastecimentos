@@ -157,12 +157,13 @@ export default function Home() {
     return Array.from(map.values()).sort((a, b) => Math.min(...a.prices.map(p => p.preco)) - Math.min(...b.prices.map(p => p.preco)));
   }, [prices]);
 
-  const stats = {
-    totalPostos: groupedStations.length,
-    tipos: new Set(prices.map(p => p.tipo_combustivel)).size,
-    menorPreco: prices.length > 0 ? Math.min(...prices.map(p => p.preco)) : 0,
-    menorTipo: prices.length > 0 ? prices.reduce((a, b) => a.preco < b.preco ? a : b).tipo_combustivel : ''
-  };
+    const stats = {
+      totalPostos: groupedStations.length,
+      tipos: new Set(prices.map(p => p.tipo_combustivel)).size,
+      menorPreco: prices.length > 0 ? Math.min(...prices.map(p => p.preco)) : 0,
+      maiorPreco: prices.length > 0 ? Math.max(...prices.map(p => p.preco)) : 0,
+      menorTipo: prices.length > 0 ? prices.reduce((a, b) => a.preco < b.preco ? a : b).tipo_combustivel : ''
+    };
 
   const mapProps = useMemo(() => {
     if (groupedStations.length > 0) return { center: [groupedStations[0].station.latitude, groupedStations[0].station.longitude] as [number, number], zoom: 13 };
@@ -248,15 +249,21 @@ export default function Home() {
                  </div>
                  
                  <div className="station-prices mt-4 flex flex-wrap gap-2">
-                   {g.prices.map(p => (
-                     <div key={p.tipo} className="price-tag bg-gray-900/80 border border-gray-700/50 p-2 rounded-lg flex flex-col min-w-[100px]">
-                       <span className="text-[10px] uppercase text-gray-500 font-bold">{p.tipo.replace('Gasolina ', 'Gas. ')}</span>
-                       <span className="text-green-400 font-bold text-sm">
-                         <span className="text-[10px] font-normal mr-0.5">R$</span>
-                         {p.preco.toFixed(3)}
-                       </span>
-                     </div>
-                   ))}
+                   {g.prices.map(p => {
+                     const isCheapest = p.preco === stats.menorPreco;
+                     const isMostExpensive = p.preco === stats.maiorPreco;
+                     const priceColor = isCheapest ? 'text-green-400' : isMostExpensive ? 'text-red-500' : 'text-gray-300';
+                     
+                     return (
+                       <div key={p.tipo} className={`price-tag bg-gray-900/80 border ${isCheapest ? 'border-green-500/30' : 'border-gray-700/50'} p-2 rounded-lg flex flex-col min-w-[100px]`}>
+                         <span className="text-[10px] uppercase text-gray-500 font-bold">{p.tipo.replace('Gasolina ', 'Gas. ')}</span>
+                         <span className={`${priceColor} font-bold text-sm`}>
+                           <span className="text-[10px] font-normal mr-0.5 opacity-60">R$</span>
+                           {p.preco.toFixed(3)}
+                         </span>
+                       </div>
+                     );
+                   })}
                  </div>
                  <div className="mt-3 text-[10px] text-gray-500 italic">
                     🕐 Atualizado {timeAgo(g.prices[0].data)}
