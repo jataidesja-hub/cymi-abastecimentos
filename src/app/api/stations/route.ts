@@ -16,130 +16,85 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    let query = supabase
-      .from('fuel_prices')
-      .select(`
-        id,
-        tipo_combustivel,
-        preco,
-        data_atualizacao,
-        reportado_por,
-        stations (
-          id,
-          nome,
-          bandeira,
-          endereco,
-          cidade,
-          estado,
-          latitude,
-          longitude
-        )
-      `)
-      .order('data_atualizacao', { ascending: false });
-
-    // Filter by city through the stations relationship
-    // We'll filter after fetching since Supabase doesn't support filtering on joined tables easily
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Supabase error:', error);
-      return NextResponse.json({ error: error.message }, { status: 500 });
+    const openAIKey = process.env.OPENAI_API_KEY;
+    if (!openAIKey) {
+      return NextResponse.json({ error: 'Chave OpenAI não configurada no servidor' }, { status: 500 });
     }
 
-    // Filter by city (case-insensitive)
-    let filtered = (data || []).filter((item: any) => {
-      const station = item.stations as any;
-      if (!station) return false;
-      const st = Array.isArray(station) ? station[0] : station;
-      return st && (st.cidade as string || '').toLowerCase().includes(cidade.toLowerCase());
+    // 100% AI POWERED SEARCH
+    const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${openAIKey}`
+      },
+      body: JSON.stringify({
+        model: 'gpt-4o-mini',
+        messages: [{
+          role: 'system',
+          content: `Você é um buscador inteligente de postos de combustível no Brasil. Seu objetivo é retornar JSON puro com uma lista de 5 postos reais e conhecidos na cidade de ${cidade} e seus preços ESTIMADOS atuais.
+          
+          Seja preciso com endereços reais. Tente variar as bandeiras (Shell, Ipiranga, BR, etc).
+          Retorne preços realistas baseados na média atual de mercado para ${cidade}.
+          
+          Retorne APENAS um JSON no formato EXATO abaixo:
+          {
+            "data": [
+              {
+                "id": "ai-1",
+                "tipo_combustivel": "Gasolina Comum",
+                "preco": 5.899,
+                "data_atualizacao": "2026-04-15T00:00:00Z",
+                "reportado_por": "IA Pesquisa",
+                "stations": {
+                  "id": "st-ai-1",
+                  "nome": "NOME REAL DO POSTO",
+                  "bandeira": "BANDEIRA REAL",
+                  "endereco": "ENDERECO REAL",
+                  "cidade": "${cidade}",
+                  "estado": "UF",
+                  "latitude": (latitude aproximada),
+                  "longitude": (longitude aproximada)
+                }
+              }
+            ]
+          }`
+        }],
+        response_format: { type: "json_object" }
+      })
     });
 
-    // IF NO DATA IN DATABASE, USE AI TO FIND/GENERATE REALISTIC DATA FOR ANY CITY IN BRAZIL
-    if (filtered.length === 0) {
-      const openAIKey = process.env.OPENAI_API_KEY;
-      if (openAIKey) {
-        try {
-          const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${openAIKey}`
-            },
-            body: JSON.stringify({
-              model: 'gpt-4o-mini',
-              messages: [{
-                role: 'system',
-                content: `Você é um buscador de postos de combustível no Brasil. Seu objetivo é retornar JSON puro com uma lista de 3 a 5 postos reais conhecidos na cidade de ${cidade} e seus preços ESTIMADOS atuais.
-                
-                Retorne APENAS um JSON no formato:
-                {
-                  "data": [
-                    {
-                      "id": "ai-1",
-                      "tipo_combustivel": "Gasolina Comum",
-                      "preco": 5.899,
-                      "data_atualizacao": "2026-04-15T00:00:00Z",
-                      "reportado_por": "IA Mercado",
-                      "stations": {
-                        "id": "st-ai-1",
-                        "nome": "NOME DO POSTO",
-                        "bandeira": "BANDEIRA",
-                        "endereco": "ENDERECO",
-                        "cidade": "${cidade}",
-                        "estado": "UF",
-                        "latitude": -9.00,
-                        "longitude": -40.00
-                      }
-                    }
-                  ]
-                }`
-              }],
-              response_format: { type: "json_object" }
-            })
-          });
-
-          const aiData = await aiResponse.json();
-          if (aiData.choices?.[0]?.message?.content) {
-            const parsed = JSON.parse(aiData.choices[0].message.content);
-            return NextResponse.json({ 
-              data: parsed.data, 
-              total: parsed.data.length,
-              source: 'IA Pesquisa Real-time' 
-            });
-          }
-        } catch (err) {
-          console.error("AI Search Error:", err);
-        }
-      }
+    const aiData = await aiResponse.json();
+    if (!aiData.choices?.[0]?.message?.content) {
+      throw new Error("Falha na resposta da IA");
     }
 
-    // Standard database filtering if data exists
+    const parsed = JSON.parse(aiData.choices[0].message.content);
+    let results = parsed.data || [];
+
+    // Filter by fuel type if specified in query (even though AI usually returns a mix)
     if (tipo && tipo !== 'Todos') {
-      filtered = filtered.filter((item: any) => item.tipo_combustivel === tipo);
+      // In a 100% AI scenario, we can either filter local results or we could have asked the AI 
+      // explicitly for that type. To keep it fast, we'll filter the AI's varied return.
+      results = results.filter((item: any) => item.tipo_combustivel === tipo);
+      
+      // If filtering emptied the list, we just show what we have or rethink. 
+      // But usually the AI returns several types.
     }
 
-    // Get latest price per station per fuel type
-    const latestPrices = new Map<string, any>();
-    for (const item of filtered) {
-      const station = item.stations as any;
-      const st = Array.isArray(station) ? station[0] : station;
-      if (!st) continue;
-      
-      const key = `${st.id}-${item.tipo_combustivel}`;
-      const newItem = { ...item, stations: st };
-      
-      if (!latestPrices.has(key)) {
-        latestPrices.set(key, newItem);
-      }
-    }
+    // Sort by price (cheapest first)
+    results.sort((a: any, b: any) => a.preco - b.preco);
 
-    const result = Array.from(latestPrices.values());
-    result.sort((a: any, b: any) => a.preco - b.preco);
+    return NextResponse.json({ 
+      data: results, 
+      total: results.length,
+      source: 'IA Pesquisa Real-time'
+    });
 
-    return NextResponse.json({ data: result, total: result.length, source: 'Database' });
   } catch (err) {
     console.error('API error:', err);
-    return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 });
+    return NextResponse.json({ error: 'Erro ao pesquisar via IA' }, { status: 500 });
   }
 }
+
 
