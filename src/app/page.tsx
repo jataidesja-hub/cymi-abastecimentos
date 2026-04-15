@@ -103,15 +103,23 @@ export default function Home() {
     if (!cidadeBusca.trim()) return;
     setLoading(true);
     setSearched(true);
+    setSource('');
     try {
       const params = new URLSearchParams({ cidade: cidadeBusca });
       if (tipo && tipo !== 'Todos') params.append('tipo', tipo);
       const res = await fetch(`/api/stations?${params}`);
       const json = await res.json();
-      setPrices(json.data || []);
-      setSource(json.source || 'Database');
-    } catch {
-      showToast('Erro ao buscar postos');
+      
+      if (json.error) {
+        showToast(`Erro API: ${json.error}`);
+        setPrices([]);
+      } else {
+        setPrices(json.data || []);
+        setSource(json.source || 'Database');
+      }
+    } catch (err) {
+      showToast('Erro técnico ao conectar com o servidor');
+      console.error(err);
     } finally {
       setLoading(false);
     }

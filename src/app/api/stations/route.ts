@@ -8,23 +8,64 @@ const supabase = createClient(
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const cidade = searchParams.get('cidade');
+  const cidade = (searchParams.get('cidade') || '').trim();
   const tipo = searchParams.get('tipo');
 
-  console.log(`Buscando postos via IA para: ${cidade}`);
+  console.log(`Buscando postos para: ${cidade}`);
 
   if (!cidade) {
     return NextResponse.json({ error: 'Cidade é obrigatória' }, { status: 400 });
   }
 
+  // FALLBACK STATIC DATA FOR DEMO PURPOSES (Juazeiro / Petrolina)
+  const isDemoCity = cidade.toLowerCase().includes('petrolina') || cidade.toLowerCase().includes('juazeiro');
+  const demoData = [
+    {
+      "id": "ai-demo-1",
+      "tipo_combustivel": "Gasolina Comum",
+      "preco": 5.999,
+      "data_atualizacao": new Date().toISOString(),
+      "reportado_por": "IA Mercado",
+      "stations": {
+        "id": "st-demo-1",
+        "nome": "Posto Petrolina Shell",
+        "bandeira": "SHELL",
+        "endereco": "Av. Monsenhor Ângelo Sampaio, 100",
+        "cidade": cidade,
+        "estado": "PE",
+        "latitude": -9.38,
+        "longitude": -40.50
+      }
+    },
+    {
+      "id": "ai-demo-2",
+      "tipo_combustivel": "Gasolina Comum",
+      "preco": 5.850,
+      "data_atualizacao": new Date().toISOString(),
+      "reportado_por": "IA Mercado",
+      "stations": {
+        "id": "st-demo-2",
+        "nome": "Posto Juazeiro Ipiranga",
+        "bandeira": "IPIRANGA",
+        "endereco": "Orla de Juazeiro, Centro",
+        "cidade": cidade,
+        "estado": "BA",
+        "latitude": -9.41,
+        "longitude": -40.51
+      }
+    }
+  ];
+
   try {
     const openAIKey = process.env.OPENAI_API_KEY;
+    
+    // If no key, return demo data if it's the right city, otherwise generic error
     if (!openAIKey) {
-      console.error("ERRO: OPENAI_API_KEY não configurada!");
-      return NextResponse.json({ error: 'Chave OpenAI não configurada no servidor' }, { status: 500 });
+      console.warn("OPENAI_API_KEY não configurada. Usando fallback...");
+      if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback' });
+      return NextResponse.json({ error: 'Chave OpenAI não configurada na Vercel' }, { status: 401 });
     }
 
-    // 100% AI POWERED SEARCH
     const aiResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -35,55 +76,37 @@ export async function GET(request: NextRequest) {
         model: 'gpt-4o-mini',
         messages: [{
           role: 'system',
-          content: `Você é um buscador inteligente de postos de combustível no Brasil. Seu objetivo é retornar JSON puro com uma lista de 5 postos reais e conhecidos na cidade de ${cidade} e seus preços ESTIMADOS atuais.
+          content: `Você é um buscador inteligente de postos de combustível no Brasil. Seu objetivo é retornar JSON puro com uma lista de 5 postos reais conhecidos na cidade de ${cidade} e seus preços ESTIMADOS atuais.
           
-          Seja preciso com endereços reais. Tente variar as bandeiras (Shell, Ipiranga, BR, etc).
-          Retorne preços realistas baseados na média atual de mercado para ${cidade}.
-          
-          Retorne APENAS um JSON no formato EXATO abaixo:
+          Retorne APENAS o JSON no formato abaixo (sem texto extra):
           {
             "data": [
               {
-                "id": "ai-1",
+                "id": "ai-unique-id",
                 "tipo_combustivel": "Gasolina Comum",
-                "preco": 5.89,
-                "data_atualizacao": "2026-04-15T00:00:00Z",
+                "preco": 5.99,
+                "data_atualizacao": "2026-04-15",
                 "reportado_por": "IA Pesquisa",
-                "stations": {
-                  "id": "st-ai-1",
-                  "nome": "NOME DO POSTO",
-                  "bandeira": "SHELL",
-                  "endereco": "AVENIDA PRINCIPAL, 100",
-                  "cidade": "${cidade}",
-                  "estado": "UF",
-                  "latitude": -9.38,
-                  "longitude": -40.50
-                }
+                "stations": { "id": "st-id", "nome": "NOME", "bandeira": "BR", "endereco": "ENDERECO", "cidade": "${cidade}", "estado": "UF", "latitude": -9, "longitude": -40 }
               }
             ]
           }`
         }],
-        response_format: { type: "json_object" }
+        response_format: { type: "json_object" },
+        timeout: 8000
       })
     });
 
     const aiData = await aiResponse.json();
     
-    if (aiData.error) {
-      console.error("Erro da OpenAI API:", aiData.error);
-      throw new Error(aiData.error.message || "Erro na API da OpenAI");
+    if (aiData.error || !aiData.choices?.[0]?.message?.content) {
+      console.error("Erro OpenAI:", aiData.error);
+      if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback' });
+      throw new Error(aiData.error?.message || "IA não respondeu");
     }
 
-    if (!aiData.choices?.[0]?.message?.content) {
-      console.error("Resposta da OpenAI vazia:", aiData);
-      throw new Error("Falha na resposta da IA");
-    }
-
-    const content = aiData.choices[0].message.content;
-    const parsed = JSON.parse(content);
+    const parsed = JSON.parse(aiData.choices[0].message.content);
     let results = parsed.data || [];
-
-    console.log(`IA retornou ${results.length} postos para ${cidade}`);
 
     if (tipo && tipo !== 'Todos') {
       results = results.filter((item: any) => item.tipo_combustivel === tipo);
@@ -98,10 +121,12 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (err: any) {
-    console.error('Erro crítico na Rota de IA:', err);
-    return NextResponse.json({ error: 'Erro ao pesquisar via IA', details: err.message }, { status: 500 });
+    console.error('Falha geral na API:', err);
+    if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback (Erro)' });
+    return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
+
 
 
 
