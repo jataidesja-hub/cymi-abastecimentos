@@ -228,24 +228,38 @@ export default function Home() {
            </div>
          ) : (
            <div className="stations-container">
+             <div className="section-title">🏆 Ranking de Preços — {cidade}</div>
              {groupedStations.map((g, i) => (
                <div key={g.station.id} className={`station-card ${i === 0 ? 'cheapest' : ''}`}>
+                 {i === 0 && <div className="cheapest-badge">🏆 MAIS BARATO</div>}
                  <div className="station-header">
+                    <div className={`station-brand ${getBrandClass(g.station.bandeira)}`}>
+                      {getBrandInitials(g.station.bandeira)}
+                    </div>
                     <div className="station-info">
                       <div className="flex items-center gap-2">
-                        <h3 className="text-white font-bold">{g.station.nome}</h3>
-                        {prices.find(p => p.stations.id === g.station.id)?.ticket_log === 'Sim' && <span className="bg-blue-600 text-[10px] px-1 rounded">Ticket Log</span>}
+                        <h3 className="m-0 text-lg font-bold text-white">{g.station.nome}</h3>
+                        {prices.find(p => p.stations.id === g.station.id)?.ticket_log === 'Sim' && (
+                          <span className="bg-blue-600 text-[10px] text-white px-2 py-0.5 rounded font-bold uppercase tracking-wider">Ticket Log</span>
+                        )}
                       </div>
-                      <div className="text-xs text-gray-400">{g.station.endereco}</div>
+                      <div className="station-address opacity-60 text-xs">📍 {g.station.endereco}</div>
                     </div>
                  </div>
-                 <div className="station-prices mt-3 flex flex-wrap gap-2">
+                 
+                 <div className="station-prices mt-4 flex flex-wrap gap-2">
                    {g.prices.map(p => (
-                     <div key={p.tipo} className="bg-gray-900 px-2 py-1 rounded text-xs">
-                       <span className="text-gray-400 mr-2">{p.tipo}</span>
-                       <span className="text-green-400 font-bold">R$ {p.preco.toFixed(3)}</span>
+                     <div key={p.tipo} className="price-tag bg-gray-900/80 border border-gray-700/50 p-2 rounded-lg flex flex-col min-w-[100px]">
+                       <span className="text-[10px] uppercase text-gray-500 font-bold">{p.tipo.replace('Gasolina ', 'Gas. ')}</span>
+                       <span className="text-green-400 font-bold text-sm">
+                         <span className="text-[10px] font-normal mr-0.5">R$</span>
+                         {p.preco.toFixed(3)}
+                       </span>
                      </div>
                    ))}
+                 </div>
+                 <div className="mt-3 text-[10px] text-gray-500 italic">
+                    🕐 Atualizado {timeAgo(g.prices[0].data)}
                  </div>
                </div>
              ))}

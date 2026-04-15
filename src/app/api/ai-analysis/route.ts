@@ -22,20 +22,20 @@ export async function POST(request: NextRequest) {
       ? `O usuário está em: Lat ${userLocation.lat}, Lon ${userLocation.lng}`
       : "Localização do usuário não disponível.";
 
-    const aiPrompt = `ATUE COMO CONSULTOR DE ELITE EM LOGÍSTICA DE FROTAS.
-    Analise os seguintes dados de postos em ${cidade}:
+    const aiPrompt = `VOCÊ É O CONSULTOR MASTER DE LOGÍSTICA DE FROTAS. 
+    Analise OBRIGATORIAMENTE os postos reais listados abaixo para ${cidade}:
     
-    DADOS ATUAIS (Preços e Localização):
+    RELATÓRIO DE PREÇOS REAIS:
     ${pricesList}
     
-    CONTEXTO DO USUÁRIO:
     ${locationContext}
     
-    SUA TAREFA - GERE UM RELATÓRIO COMPLETO:
-    1. CLASSIFICAÇÃO DE QUALIDADE: Diferencie postos de BANDEIRA BRANCA vs BANDEIRADOS (Shell, Ipiranga, BR).
-    2. ESTUDO DE DESLOCAMENTO: Se a localização do usuário estiver disponível, calcule se vale a pena o deslocamento para o posto mais barato.
-    3. RECOMENDAÇÃO MASTER: Escolha o vencedor (Preço + Qualidade + Localização). Seja específico.
-    4. FORMATAÇÃO: Use Markdown profissional (tabelas, negritos).`;
+    REGRAS DE OURO PARA SUA RESPOSTA:
+    1. NÃO USE FRASES GENÉRICAS. Cite os nomes exatos dos postos e seus endereços.
+    2. CLASSIFICAÇÃO: Diga quais são "Bandeira de Qualidade" (ex: Shell, Ipiranga) e quais são "Bandeira Branca".
+    3. VALE A PENA?: Informe se a economia de preço no "Posto X" compensa o trajeto considerando a posição do usuário.
+    4. RECOMENDAÇÃO FINAL: Diga algo como "O vencedor para sua frota é o [NOME DO POSTO] localizado em [ENDEREÇO], com o preço de R$ [VALOR] por ser o melhor equilíbrio entre qualidade e custo de deslocamento".
+    5. FORMATAÇÃO: Use Markdown profissional (tabelas, negritos).`;
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
     
