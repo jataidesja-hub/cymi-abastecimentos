@@ -47,32 +47,29 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Chave Gemini não configurada' }, { status: 401 });
     }
 
-    const prompt = `Atue como um analista de logística de frotas. Realize uma pesquisa sobre os preços atuais de combustíveis (Gasolina, Etanol e Diesel S10) na cidade de ${cidade}. 
+    const prompt = `ATUE COMO ANALISTA DE LOGÍSTICA DE FROTAS (TICKET LOG).
+    Pesquise preços atuais de combustíveis (Gasolina, Etanol e Diesel S10) em ${cidade}.
     
-    FILTRO ESPECIAL: Priorize listar postos reais que aceitam o cartão Ticket Log (Edenred).
+    DIRETRIZES:
+    1. Baseie-se em preços reais (ANP 2026): Gasolina ~R$ 6.80-7.30, Etanol ~R$ 5.20.
+    2. Liste 5 postos REAIS conhecidos em ${cidade}.
+    3. Informe se aceitam Ticket Log (Edenred) - Seja realista.
     
-    Diretrizes:
-    1. Verifique as médias de preços da ANP para a região (Nordeste 2026: Gasolina ~6.80-7.20, Etanol ~5.20).
-    2. Identifique pelo menos 4-5 postos reais conhecidos nessa cidade.
-    3. Para CADA posto, retorne os preços de Gasolina Comum, Etanol e Diesel S10 se disponíveis.
-    4. Indique se o posto aceita Ticket Log (Sim/Não).
-    
-    Retorne APENAS um JSON no formato EXATO abaixo:
+    RESPOSTA OBRIGATÓRIA EM JSON PURO:
     {
       "data": [
         {
           "station_info": {
-            "nome": "Posto Exemplo (Shell)",
-            "bandeira": "Shell",
-            "endereco": "Rua Tal, Bairro Centro",
-            "latitude": -9.38,
-            "longitude": -40.50,
+            "nome": "Posto X",
+            "bandeira": "BR",
+            "endereco": "Av. Brasil, 100",
+            "latitude": -12.97,
+            "longitude": -38.50,
             "ticket_log": "Sim"
           },
           "prices": [
-            { "tipo": "Gasolina Comum", "preco": 6.899, "data": "2026-04-15" },
-            { "tipo": "Etanol", "preco": 5.190, "data": "2026-04-15" },
-            { "tipo": "Diesel S10", "preco": 6.090, "data": "2026-04-15" }
+            { "tipo": "Gasolina Comum", "preco": 6.99, "data": "2026-04-15" },
+            { "tipo": "Etanol", "preco": 5.25, "data": "2026-04-15" }
           ]
         }
       ]
@@ -84,17 +81,19 @@ export async function GET(request: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: "application/json" }
+        contents: [{ parts: [{ text: prompt }] }]
       })
     });
 
     const data = await response.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text;
+    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    
+    // Limpeza de Markdown caso a IA retorne blocos ```json
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
     
     if (!text) {
       if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Demo Fallback' });
-      throw new Error("Resposta do Gemini vazia");
+      throw new Error("O Gemini não conseguiu retornar dados para esta cidade.");
     }
 
     const parsed = JSON.parse(text);

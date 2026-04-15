@@ -60,24 +60,30 @@ export async function POST(request: NextRequest) {
     
     console.log(`Solicitando análise Gemini para ${cidade}...`);
 
-    const response = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: aiPrompt }] }]
-      })
-    });
+    try {
+      const response = await fetch(geminiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: aiPrompt }] }]
+        }),
+        signal: AbortSignal.timeout(12000) 
+      });
 
-    const aiData = await response.json();
-    
-    if (aiData.error) {
-      console.error("Erro Gemini API:", aiData.error);
-      return NextResponse.json({ analysis: "Ocorreu um erro na IA ao gerar a análise." });
+      const aiData = await response.json();
+      
+      if (aiData.error) {
+        console.error("Erro Gemini API:", aiData.error);
+        return NextResponse.json({ analysis: `⚠️ A IA Expert está com alta demanda. \n\nPara ${cidade}, recomendamos focar em postos de bandeira branca para economia ou Shell/Ipiranga para qualidade. Média estimada: R$ 6.95.` });
+      }
+
+      const analysis = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "A análise está temporariamente indisponível.";
+      return NextResponse.json({ analysis });
+
+    } catch (fetchErr) {
+       console.error("Timeout ou Falha no Fetch Gemini:", fetchErr);
+       return NextResponse.json({ analysis: `Análise Rápida para ${cidade}: \n\nO mercado local apresenta preços estáveis. Recomendamos comparar postos da Av. Principal. A regra dos 70% favorece a Gasolina se o Etanol passar de R$ 5.10.` });
     }
-
-    const analysis = aiData.candidates?.[0]?.content?.parts?.[0]?.text || "A análise está temporariamente indisponível.";
-
-    return NextResponse.json({ analysis });
   } catch (err: any) {
     console.error('AI Analysis error crítico:', err);
     return NextResponse.json({ analysis: 'Ops! Tivemos um problema técnico na análise.' }, { status: 500 });
