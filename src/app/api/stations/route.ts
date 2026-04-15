@@ -42,30 +42,27 @@ export async function GET(request: NextRequest) {
     const geminiKey = process.env.GEMINI_API_KEY;
     
     const generateContingencyData = (cityName: string) => {
-      // Preços reais pesquisados para a Bahia/Curaçá (Abril 2026)
-      const isBahia = cityName.toLowerCase().includes('ba') || cityName.toLowerCase().includes('cura');
-      const baseGas = isBahia ? 6.77 : 6.99;
-      const baseEta = isBahia ? 4.69 : 5.25;
-      const baseDie = isBahia ? 7.43 : 6.15;
+      // Preços regionais simplificados
+      const isCura = cityName.toLowerCase().includes('cura');
+      const baseGas = isCura ? 6.77 : 6.99;
+      const baseEta = isCura ? 4.69 : 5.10;
+      const baseDie = isCura ? 7.43 : 6.15;
 
       return [
         {
           "id": `ai-c-${cityName}-1`, "tipo_combustivel": "Gasolina Comum", "preco": baseGas, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
-          "ticket_log": "Sim", "stations": { "id": "c1", "nome": `Posto Curaçá (Referência)`, "bandeira": "BR", "endereco": `Entrada da Cidade, ${cityName}`, "cidade": cityName, "estado": "BA", "latitude": -9.141, "longitude": -39.907 }
+          "ticket_log": "Sim", "stations": { "id": "c1", "nome": `Posto Ipiranga ${cityName}`, "bandeira": "IPIRANGA", "endereco": `Av. Principal, ${cityName}`, "cidade": cityName, "estado": "UF", "latitude": -12.97, "longitude": -38.50 }
         },
         {
           "id": `ai-c-${cityName}-2`, "tipo_combustivel": "Etanol", "preco": baseEta, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
-          "ticket_log": "Sim", "stations": { "id": "c1", "nome": `Posto Curaçá (Referência)`, "bandeira": "BR", "endereco": `Entrada da Cidade, ${cityName}`, "cidade": cityName, "estado": "BA", "latitude": -9.141, "longitude": -39.907 }
-        },
-        {
-          "id": `ai-c-${cityName}-3`, "tipo_combustivel": "Diesel S10", "preco": baseDie, "data_atualizacao": new Date().toISOString(), "reportado_por": "IA Mercado",
-          "ticket_log": "Sim", "stations": { "id": "c3", "nome": `Posto São Bento`, "bandeira": "IPIRANGA", "endereco": `Rodovia BA-210, ${cityName}`, "cidade": cityName, "estado": "BA", "latitude": -9.145, "longitude": -39.910 }
+          "ticket_log": "Sim", "stations": { "id": "c1", "nome": `Posto Ipiranga ${cityName}`, "bandeira": "IPIRANGA", "endereco": `Av. Principal, ${cityName}`, "cidade": cityName, "estado": "UF", "latitude": -12.97, "longitude": -38.50 }
         }
       ];
     };
 
     if (!geminiKey) {
-      const fallback = isDemoCity ? demoData : generateContingencyData(cidade);
+      if (isDemoCity) return NextResponse.json({ data: demoData, source: 'Dados de Referência' });
+      const fallback = generateContingencyData(cidade);
       return NextResponse.json({ data: fallback, source: 'Modo Contingência (Chave IA Ausente)' });
     }
 
