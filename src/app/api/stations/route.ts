@@ -11,6 +11,8 @@ export async function GET(request: NextRequest) {
   const cidade = searchParams.get('cidade');
   const tipo = searchParams.get('tipo');
 
+  console.log(`Buscando postos via IA para: ${cidade}`);
+
   if (!cidade) {
     return NextResponse.json({ error: 'Cidade é obrigatória' }, { status: 400 });
   }
@@ -18,6 +20,7 @@ export async function GET(request: NextRequest) {
   try {
     const openAIKey = process.env.OPENAI_API_KEY;
     if (!openAIKey) {
+      console.error("ERRO: OPENAI_API_KEY não configurada!");
       return NextResponse.json({ error: 'Chave OpenAI não configurada no servidor' }, { status: 500 });
     }
 
@@ -43,18 +46,18 @@ export async function GET(request: NextRequest) {
               {
                 "id": "ai-1",
                 "tipo_combustivel": "Gasolina Comum",
-                "preco": 5.899,
+                "preco": 5.89,
                 "data_atualizacao": "2026-04-15T00:00:00Z",
                 "reportado_por": "IA Pesquisa",
                 "stations": {
                   "id": "st-ai-1",
-                  "nome": "NOME REAL DO POSTO",
-                  "bandeira": "BANDEIRA REAL",
-                  "endereco": "ENDERECO REAL",
+                  "nome": "NOME DO POSTO",
+                  "bandeira": "SHELL",
+                  "endereco": "AVENIDA PRINCIPAL, 100",
                   "cidade": "${cidade}",
                   "estado": "UF",
-                  "latitude": (latitude aproximada),
-                  "longitude": (longitude aproximada)
+                  "latitude": -9.38,
+                  "longitude": -40.50
                 }
               }
             ]
@@ -65,24 +68,27 @@ export async function GET(request: NextRequest) {
     });
 
     const aiData = await aiResponse.json();
+    
+    if (aiData.error) {
+      console.error("Erro da OpenAI API:", aiData.error);
+      throw new Error(aiData.error.message || "Erro na API da OpenAI");
+    }
+
     if (!aiData.choices?.[0]?.message?.content) {
+      console.error("Resposta da OpenAI vazia:", aiData);
       throw new Error("Falha na resposta da IA");
     }
 
-    const parsed = JSON.parse(aiData.choices[0].message.content);
+    const content = aiData.choices[0].message.content;
+    const parsed = JSON.parse(content);
     let results = parsed.data || [];
 
-    // Filter by fuel type if specified in query (even though AI usually returns a mix)
+    console.log(`IA retornou ${results.length} postos para ${cidade}`);
+
     if (tipo && tipo !== 'Todos') {
-      // In a 100% AI scenario, we can either filter local results or we could have asked the AI 
-      // explicitly for that type. To keep it fast, we'll filter the AI's varied return.
       results = results.filter((item: any) => item.tipo_combustivel === tipo);
-      
-      // If filtering emptied the list, we just show what we have or rethink. 
-      // But usually the AI returns several types.
     }
 
-    // Sort by price (cheapest first)
     results.sort((a: any, b: any) => a.preco - b.preco);
 
     return NextResponse.json({ 
@@ -91,10 +97,11 @@ export async function GET(request: NextRequest) {
       source: 'IA Pesquisa Real-time'
     });
 
-  } catch (err) {
-    console.error('API error:', err);
-    return NextResponse.json({ error: 'Erro ao pesquisar via IA' }, { status: 500 });
+  } catch (err: any) {
+    console.error('Erro crítico na Rota de IA:', err);
+    return NextResponse.json({ error: 'Erro ao pesquisar via IA', details: err.message }, { status: 500 });
   }
 }
+
 
 
