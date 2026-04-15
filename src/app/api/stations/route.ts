@@ -19,10 +19,7 @@ export async function GET(request: NextRequest) {
       }, { status: 401 });
     }
 
-    const prompt = `VOCÊ É UM AGENTE DE BUSCA EM TEMPO REAL.
-    PESQUISE AGORA os postos de combustível em ${cidade} e seus preços atuais (Abril 2026).
-    Foque em postos que aceitam TICKET LOG.
-    RETORNE EM JSON PURO: {"data": [{"station_info": {"nome": "N", "bandeira": "B", "endereco": "E", "latitude": -9, "longitude": -40, "ticket_log": "Sim"}, "prices": [{"tipo": "Gasolina Comum", "preco": 6.80, "data": "2026-04-15"}]}]}`;
+    const prompt = `Liste postos e preços de combustíveis (Gasolina/Etanol) para ${cidade}. Retorne somente JSON: {"data": [{"station_info": {"nome": "N", "bandeira": "B", "endereco": "E", "latitude": -9, "longitude": -40, "ticket_log": "Sim"}, "prices": [{"tipo": "Gasolina Comum", "preco": 6.80, "data": "2026-04-15"}]}]}`;
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${geminiKey}`;
     
@@ -30,12 +27,22 @@ export async function GET(request: NextRequest) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }]
+        contents: [{ parts: [{ text: prompt }] }],
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+        ]
       }),
       signal: AbortSignal.timeout(15000)
     });
 
-    if (!response.ok) throw new Error(`Gemini API retornou erro ${response.status}`);
+    if (!response.ok) {
+      const errorBody = await response.text();
+      console.error("[GEMINI ERROR BODY]:", errorBody);
+      throw new Error(`Gemini erro ${response.status}: ${errorBody.slice(0, 100)}`);
+    }
 
     const data = await response.json();
     let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
