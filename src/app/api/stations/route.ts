@@ -6,9 +6,34 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// Mirrors do Overpass API — tenta em ordem até um funcionar
+const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+
+async function queryOverpass(query: string): Promise<any[] | null> {
+  for (const mirror of OVERPASS_MIRRORS) {
+    try {
+      const res = await fetch(mirror, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: `data=${encodeURIComponent(query)}`,
+        signal: AbortSignal.timeout(18000),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      return data.elements as any[];
+    } catch {
+      // tenta o próximo mirror
+    }
+  }
+  return null; // todos os mirrors falharam
+}
+
 // ─── Overpass API: busca por bounding box de uma cidade ───────────────────────
 async function getStationsByCity(cidade: string) {
-  // Geocodifica a cidade para obter bounding box
   const geoRes = await fetch(
     `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1`,
     {
@@ -21,35 +46,14 @@ async function getStationsByCity(cidade: string) {
 
   // Nominatim retorna: [min_lat, max_lat, min_lon, max_lon]
   const [south, north, west, east] = geoData[0].boundingbox.map(Number);
-
-  const query = `[out:json][timeout:20];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 80 center;`;
-
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-    signal: AbortSignal.timeout(22000),
-  });
-
-  if (!res.ok) throw new Error('Overpass API indisponível');
-  const data = await res.json();
-  return data.elements as any[];
+  const query = `[out:json][timeout:18];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 80 center;`;
+  return queryOverpass(query);
 }
 
 // ─── Overpass API: busca por raio em torno de coordenadas GPS ─────────────────
 async function getStationsByCoords(lat: number, lon: number) {
-  const query = `[out:json][timeout:20];(node["amenity"="fuel"](around:6000,${lat},${lon});way["amenity"="fuel"](around:6000,${lat},${lon}););out 80 center;`;
-
-  const res = await fetch('https://overpass-api.de/api/interpreter', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: `data=${encodeURIComponent(query)}`,
-    signal: AbortSignal.timeout(22000),
-  });
-
-  if (!res.ok) throw new Error('Overpass API indisponível');
-  const data = await res.json();
-  return data.elements as any[];
+  const query = `[out:json][timeout:18];(node["amenity"="fuel"](around:6000,${lat},${lon});way["amenity"="fuel"](around:6000,${lat},${lon}););out 80 center;`;
+  return queryOverpass(query);
 }
 
 // ─── Normaliza nome de bandeira ───────────────────────────────────────────────
@@ -94,13 +98,8 @@ export async function GET(request: NextRequest) {
       osmElements = await getStationsByCity(cidade);
     }
 
-    if (!osmElements || osmElements.length === 0) {
-      return NextResponse.json({
-        data: [],
-        source: 'OpenStreetMap',
-        message: 'Nenhum posto encontrado no OpenStreetMap para essa região.',
-      });
-    }
+    const osmUnavailable = osmElements === null;
+    if (!osmElements) osmElements = []; // OSM falhou — continua só com Supabase
 
     const cidadeFinal = cidade || 'Região GPS';
     const osmIds = osmElements.map((e: any) => e.id);
@@ -257,8 +256,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: result,
-      source: 'OpenStreetMap + Comunidade',
+      source: osmUnavailable ? 'Supabase (OSM indisponível)' : 'OpenStreetMap + Comunidade',
       total_osm: osmElements.length,
+      osm_unavailable: osmUnavailable,
     });
   } catch (err: any) {
     console.error('[ERRO STATIONS]:', err.message);
