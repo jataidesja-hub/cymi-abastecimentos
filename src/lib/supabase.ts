@@ -7,6 +7,7 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey);
 
 export type FuelStation = {
   id: string;
+  osm_id?: number | null;
   nome: string;
   bandeira: string;
   endereco: string;
@@ -14,6 +15,7 @@ export type FuelStation = {
   estado: string;
   latitude: number;
   longitude: number;
+  ticket_log?: boolean;
   created_at: string;
 };
 

@@ -624,6 +624,7 @@ body {
   outline: none;
   transition: all 0.3s ease;
   -webkit-appearance: none;
+  appearance: none;
 }
 
 .form-input:focus,
@@ -934,5 +935,72 @@ body {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* ===== TICKET LOG TOGGLE ===== */
+.ticket-log-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Inter', sans-serif;
+}
+
+.ticket-log-toggle:hover {
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.ticket-log-toggle.active {
+  background: rgba(59, 130, 246, 0.12);
+  border-color: var(--accent-blue);
+  color: var(--accent-blue);
+}
+
+.ticket-log-badge {
+  background: var(--accent-blue);
+  color: white;
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+/* ===== TICKET LOG CHECKBOX (no modal) ===== */
+.ticket-log-checkbox {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  border: 2px solid var(--border-color);
+  background: var(--bg-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  color: white;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.ticket-log-checkbox.checked {
+  background: var(--accent-blue);
+  border-color: var(--accent-blue);
+}
+
+/* ===== TOAST VARIANTE ERRO ===== */
+.toast.toast-error {
+  background: var(--accent-red);
+  box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
 }
 

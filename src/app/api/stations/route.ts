@@ -1,114 +1,267 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
+
+// ─── Overpass API: busca por bounding box de uma cidade ───────────────────────
+async function getStationsByCity(cidade: string) {
+  // Geocodifica a cidade para obter bounding box
+  const geoRes = await fetch(
+    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1`,
+    {
+      headers: { 'User-Agent': 'CombustivelApp/1.0' },
+      signal: AbortSignal.timeout(8000),
+    }
+  );
+  const geoData = await geoRes.json();
+  if (!geoData[0]?.boundingbox) return null;
+
+  // Nominatim retorna: [min_lat, max_lat, min_lon, max_lon]
+  const [south, north, west, east] = geoData[0].boundingbox.map(Number);
+
+  const query = `[out:json][timeout:20];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 80 center;`;
+
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(query)}`,
+    signal: AbortSignal.timeout(22000),
+  });
+
+  if (!res.ok) throw new Error('Overpass API indisponível');
+  const data = await res.json();
+  return data.elements as any[];
+}
+
+// ─── Overpass API: busca por raio em torno de coordenadas GPS ─────────────────
+async function getStationsByCoords(lat: number, lon: number) {
+  const query = `[out:json][timeout:20];(node["amenity"="fuel"](around:6000,${lat},${lon});way["amenity"="fuel"](around:6000,${lat},${lon}););out 80 center;`;
+
+  const res = await fetch('https://overpass-api.de/api/interpreter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: `data=${encodeURIComponent(query)}`,
+    signal: AbortSignal.timeout(22000),
+  });
+
+  if (!res.ok) throw new Error('Overpass API indisponível');
+  const data = await res.json();
+  return data.elements as any[];
+}
+
+// ─── Normaliza nome de bandeira ───────────────────────────────────────────────
+function normalizeBrand(brand: string): string {
+  if (!brand) return 'Branco';
+  const b = brand.toLowerCase();
+  if (b.includes('shell') || b.includes('raizen') || b.includes('raízen')) return 'Shell';
+  if (b.includes('ipiranga') || b.includes('vibra')) return 'Ipiranga';
+  if (b.includes('petrobras') || b === 'br') return 'Petrobras';
+  if (b.includes('ale')) return 'Ale';
+  return brand;
+}
+
+// ─── Monta endereço a partir das tags OSM ────────────────────────────────────
+function buildAddress(tags: Record<string, string>): string {
+  const street = tags['addr:street'];
+  const number = tags['addr:housenumber'];
+  const neighborhood = tags['addr:suburb'] || tags['addr:neighbourhood'];
+  if (street) return [street, number, neighborhood].filter(Boolean).join(', ');
+  if (tags['addr:full']) return tags['addr:full'];
+  return 'Endereço não cadastrado';
+}
+
+// ─── Handler principal ────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
     const cidade = (searchParams.get('cidade') || '').trim();
+    const latParam = searchParams.get('lat');
+    const lonParam = searchParams.get('lon');
     const tipo = searchParams.get('tipo');
 
-    if (!cidade) return NextResponse.json({ error: 'Cidade é obrigatória' }, { status: 400 });
-
-    console.log(`[LOG] PESQUISA REAL IA SOLICITADA PARA: ${cidade}`);
-
-    const geminiKey = process.env.GEMINI_API_KEY;
-    
-    if (!geminiKey) {
-      return NextResponse.json({ 
-        error: 'IA DESCONECTADA: Você precisa configurar a GEMINI_API_KEY na Vercel.',
-        source: 'Erro de Configuração'
-      }, { status: 401 });
+    if (!cidade && (!latParam || !lonParam)) {
+      return NextResponse.json({ error: 'Informe cidade ou localização GPS' }, { status: 400 });
     }
 
-    const prompt = `Liste postos e preços de combustíveis (Gasolina/Etanol) para ${cidade}. Retorne somente JSON: {"data": [{"station_info": {"nome": "N", "bandeira": "B", "endereco": "E", "latitude": -9, "longitude": -40, "ticket_log": "Sim"}, "prices": [{"tipo": "Gasolina Comum", "preco": 6.80, "data": "2026-04-15"}]}]}`;
+    // 1. Busca postos reais no OpenStreetMap
+    let osmElements: any[] | null = null;
+    if (latParam && lonParam) {
+      osmElements = await getStationsByCoords(parseFloat(latParam), parseFloat(lonParam));
+    } else {
+      osmElements = await getStationsByCity(cidade);
+    }
 
-    // LISTA DE ENDPOINTS PARA TENTATIVA AUTOMÁTICA (Resiliência total contra 404)
-    const endpoints = [
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${geminiKey}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${geminiKey}`,
-      `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${geminiKey}`
-    ];
+    if (!osmElements || osmElements.length === 0) {
+      return NextResponse.json({
+        data: [],
+        source: 'OpenStreetMap',
+        message: 'Nenhum posto encontrado no OpenStreetMap para essa região.',
+      });
+    }
 
-    let response: Response | null = null;
-    let lastError = "";
+    const cidadeFinal = cidade || 'Região GPS';
+    const osmIds = osmElements.map((e: any) => e.id);
 
-    for (const url of endpoints) {
-      try {
-        console.log(`Tentando IA via: ${url.split('models/')[1].split(':')[0]}`);
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: prompt }] }],
-            safetySettings: [
-              { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-              { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-            ]
-          }),
-          signal: AbortSignal.timeout(10000)
-        });
+    // 2. Busca no Supabase postos já cadastrados pelo osm_id
+    const { data: dbByOsmId } = await supabase
+      .from('stations')
+      .select('*')
+      .in('osm_id', osmIds);
 
-        if (res.ok) {
-          response = res;
-          break;
-        } else {
-          const errText = await res.text();
-          lastError = `URL ${url} falhou: ${errText}`;
+    const osmIdToDb = new Map<number, any>();
+    (dbByOsmId || []).forEach((s: any) => {
+      if (s.osm_id != null) osmIdToDb.set(Number(s.osm_id), s);
+    });
+
+    // 3. Busca postos da cidade que foram inseridos manualmente (sem osm_id)
+    const { data: dbByCity } = await supabase
+      .from('stations')
+      .select('*')
+      .ilike('cidade', `%${cidadeFinal}%`);
+
+    const dbIdToStation = new Map<string, any>();
+    (dbByCity || []).forEach((s: any) => dbIdToStation.set(s.id, s));
+
+    // 4. Consolida todos os IDs de estações do Supabase para buscar preços
+    const allDbIds = [
+      ...(dbByOsmId || []).map((s: any) => s.id),
+      ...(dbByCity || []).map((s: any) => s.id),
+    ].filter((v, i, a) => a.indexOf(v) === i);
+
+    const pricesMap = new Map<string, any[]>();
+
+    if (allDbIds.length > 0) {
+      let q = supabase
+        .from('fuel_prices')
+        .select('*')
+        .in('station_id', allDbIds)
+        .order('data_atualizacao', { ascending: false });
+
+      if (tipo && tipo !== 'Todos') {
+        q = q.eq('tipo_combustivel', tipo);
+      }
+
+      const { data: allPrices } = await q;
+
+      // Mantém apenas o preço mais recente por posto + tipo
+      const seenKeys = new Set<string>();
+      (allPrices || []).forEach((p: any) => {
+        const key = `${p.station_id}::${p.tipo_combustivel}`;
+        if (!seenKeys.has(key)) {
+          seenKeys.add(key);
+          if (!pricesMap.has(p.station_id)) pricesMap.set(p.station_id, []);
+          pricesMap.get(p.station_id)!.push(p);
         }
-      } catch (e: any) {
-        lastError = e.message;
+      });
+    }
+
+    // 5. Monta a resposta combinando OSM + Supabase
+    const result: any[] = [];
+    const seenIds = new Set<string>();
+
+    for (const el of osmElements) {
+      const lat = el.lat ?? el.center?.lat;
+      const lon = el.lon ?? el.center?.lon;
+      if (!lat || !lon) continue;
+
+      const tags = el.tags || {};
+      const nome = tags.name || tags['name:pt'] || tags.brand || 'Posto de Combustível';
+      const bandeira = normalizeBrand(tags.brand || tags['brand:pt'] || '');
+      const endereco = buildAddress(tags);
+      const ticketLogOsm = tags['payment:ticketlog'] === 'yes';
+
+      const dbStation = osmIdToDb.get(el.id);
+      const ticketLog = dbStation?.ticket_log || ticketLogOsm;
+      const stationId = dbStation?.id || `osm-${el.id}`;
+
+      if (seenIds.has(stationId)) continue;
+      seenIds.add(stationId);
+
+      const stationInfo = {
+        id: stationId,
+        osm_id: el.id,
+        nome: dbStation?.nome || nome,
+        bandeira: dbStation?.bandeira || bandeira,
+        endereco: dbStation?.endereco || endereco,
+        cidade: dbStation?.cidade || cidadeFinal,
+        estado: dbStation?.estado || tags['addr:state'] || '',
+        latitude: lat,
+        longitude: lon,
+        ticket_log: ticketLog,
+      };
+
+      const prices = dbStation ? (pricesMap.get(dbStation.id) || []) : [];
+
+      if (prices.length > 0) {
+        prices.forEach((p: any) => {
+          result.push({
+            id: p.id,
+            tipo_combustivel: p.tipo_combustivel,
+            preco: parseFloat(p.preco),
+            data_atualizacao: p.data_atualizacao,
+            reportado_por: p.reportado_por || 'comunidade',
+            ticket_log: ticketLog ? 'Sim' : 'Não',
+            stations: stationInfo,
+          });
+        });
+      } else {
+        // Posto real encontrado, mas sem preço ainda
+        result.push({
+          id: `sem-preco-${el.id}`,
+          tipo_combustivel: 'sem_preco',
+          preco: 0,
+          data_atualizacao: new Date().toISOString(),
+          reportado_por: 'OpenStreetMap',
+          ticket_log: ticketLog ? 'Sim' : 'Não',
+          stations: stationInfo,
+        });
       }
     }
 
-    if (!response) {
-      throw new Error(`A IA não pôde ser ativada com sua chave. Erro final: ${lastError.slice(0, 150)}`);
-    }
+    // 6. Inclui postos do Supabase que têm preço mas não apareceram no OSM
+    for (const [id, dbSt] of dbIdToStation) {
+      if (seenIds.has(id)) continue;
+      seenIds.add(id);
 
-    const data = await response.json();
-    let text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) throw new Error("A IA não conseguiu encontrar dados para esta cidade.");
+      const prices = pricesMap.get(id) || [];
+      if (prices.length === 0) continue; // sem preço e não estava no OSM = ignora
 
-    const parsed = JSON.parse(jsonMatch[0]);
-    const rawResults = parsed.data || [];
+      const stationInfo = {
+        id: dbSt.id,
+        osm_id: dbSt.osm_id ?? null,
+        nome: dbSt.nome,
+        bandeira: dbSt.bandeira,
+        endereco: dbSt.endereco,
+        cidade: dbSt.cidade,
+        estado: dbSt.estado,
+        latitude: dbSt.latitude,
+        longitude: dbSt.longitude,
+        ticket_log: dbSt.ticket_log || false,
+      };
 
-    let finalData: any[] = [];
-    rawResults.forEach((item: any) => {
-      item.prices.forEach((p: any) => {
-        finalData.push({
-          id: `${item.station_info.nome}-${p.tipo}`,
-          tipo_combustivel: p.tipo,
-          preco: p.preco,
-          data_atualizacao: p.data,
-          reportado_por: "Busca IA em Tempo Real",
-          ticket_log: item.station_info.ticket_log,
-          stations: {
-            id: item.station_info.nome,
-            nome: item.station_info.nome,
-            bandeira: item.station_info.bandeira,
-            endereco: item.station_info.endereco,
-            cidade: cidade,
-            estado: "",
-            latitude: item.station_info.latitude,
-            longitude: item.station_info.longitude
-          }
+      prices.forEach((p: any) => {
+        result.push({
+          id: p.id,
+          tipo_combustivel: p.tipo_combustivel,
+          preco: parseFloat(p.preco),
+          data_atualizacao: p.data_atualizacao,
+          reportado_por: p.reportado_por || 'comunidade',
+          ticket_log: dbSt.ticket_log ? 'Sim' : 'Não',
+          stations: stationInfo,
         });
       });
-    });
-
-    if (tipo && tipo !== 'Todos') {
-      finalData = finalData.filter((f: any) => f.tipo_combustivel.toLowerCase().includes(tipo.toLowerCase()));
     }
 
-    return NextResponse.json({ data: finalData, source: 'Analista de Logística IA' });
-
+    return NextResponse.json({
+      data: result,
+      source: 'OpenStreetMap + Comunidade',
+      total_osm: osmElements.length,
+    });
   } catch (err: any) {
-    console.error('[ERRO IA]:', err.message);
-    return NextResponse.json({ 
-      error: `Erro na Busca: ${err.message}`,
-      source: 'Falha na IA'
-    }, { status: 500 });
+    console.error('[ERRO STATIONS]:', err.message);
+    return NextResponse.json({ error: `Erro na busca: ${err.message}` }, { status: 500 });
   }
 }
