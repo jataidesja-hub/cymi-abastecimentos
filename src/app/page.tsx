@@ -405,18 +405,25 @@ export default function Home() {
 
       {/* ── Tabs Lista / Mapa ── */}
       {searched && groupedStations.length > 0 && activeTab !== 'ai' && (
-        <div className="flex px-5 mb-4 gap-2">
+        <div className="view-tabs">
           <button
-            className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'home' ? 'bg-green-600' : 'bg-gray-800'}`}
+            className={`view-tab lista ${activeTab === 'home' ? 'active' : ''}`}
             onClick={() => setActiveTab('home')}
           >
-            📋 Lista
+            <span className="view-tab-icon">📋</span>
+            Lista
+            {activeTab === 'home' && (
+              <span className="text-[10px] font-normal opacity-60 ml-1">
+                {groupedStations.length}
+              </span>
+            )}
           </button>
           <button
-            className={`flex-1 py-2 rounded-lg text-sm font-bold transition-colors ${activeTab === 'map' ? 'bg-green-600' : 'bg-gray-800'}`}
+            className={`view-tab mapa ${activeTab === 'map' ? 'active' : ''}`}
             onClick={() => setActiveTab('map')}
           >
-            🗺️ Mapa
+            <span className="view-tab-icon">🗺️</span>
+            Mapa
           </button>
         </div>
       )}

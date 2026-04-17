@@ -937,6 +937,60 @@ body {
   to { opacity: 1; transform: translateY(0); }
 }
 
+/* ===== VIEW TABS (Lista / Mapa) ===== */
+.view-tabs {
+  display: flex;
+  margin: 0 20px 16px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  padding: 4px;
+  gap: 4px;
+  border: 1px solid var(--border-color);
+}
+
+.view-tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 9px 12px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: var(--text-secondary);
+  background: transparent;
+  border: none;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.3px;
+}
+
+.view-tab:hover {
+  color: var(--text-primary);
+  background: rgba(255,255,255,0.05);
+}
+
+.view-tab.active {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+.view-tab.active.lista {
+  color: var(--accent-green);
+}
+
+.view-tab.active.mapa {
+  color: var(--accent-blue);
+}
+
+.view-tab-icon {
+  font-size: 15px;
+  line-height: 1;
+}
+
 /* ===== TICKET LOG TOGGLE ===== */
 .ticket-log-toggle {
   display: inline-flex;
