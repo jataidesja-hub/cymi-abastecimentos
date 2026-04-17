@@ -88,6 +88,7 @@ export default function Home() {
   const [userLocation, setUserLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [toast, setToast] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
+  const [webPricesLoading, setWebPricesLoading] = useState(false);
 
   // Estado do modal de reporte
   const [showReport, setShowReport] = useState(false);
@@ -122,15 +123,59 @@ export default function Home() {
         if (json.error) {
           showToast(json.error, 'error');
           setPrices([]);
-        } else {
-          const data: FuelPriceItem[] = json.data || [];
-          setPrices(data);
-          setSource(json.source || '');
-          const semPreco = data.filter(d => d.tipo_combustivel === 'sem_preco').length;
-          const comPreco = data.filter(d => d.preco > 0).length;
-          if (data.length > 0 && comPreco === 0) {
-            showToast(`${semPreco} postos encontrados. Seja o primeiro a reportar preços!`);
-          }
+          return;
+        }
+
+        const data: FuelPriceItem[] = json.data || [];
+        setPrices(data);
+        setSource(json.source || '');
+
+        // Se há postos sem preço, busca estimativas na web em background
+        const semPrecoIds = new Set(
+          data.filter(d => d.tipo_combustivel === 'sem_preco').map(d => d.stations.id)
+        );
+        if (semPrecoIds.size > 0 && cidadeBusca.trim()) {
+          setWebPricesLoading(true);
+          fetch(`/api/web-prices?cidade=${encodeURIComponent(cidadeBusca.trim())}`)
+            .then(r => r.json())
+            .then(wp => {
+              if (!wp.prices) return;
+              const FUEL_MAP: Record<string, string> = {
+                gasolina_comum: 'Gasolina Comum',
+                gasolina_aditivada: 'Gasolina Aditivada',
+                etanol: 'Etanol',
+                diesel_s10: 'Diesel S10',
+                diesel_s500: 'Diesel S500',
+                gnv: 'GNV',
+              };
+              setPrices(prev => {
+                // Remove entradas sem_preco e adiciona preços web para cada posto
+                const semPreco = prev.filter(p => p.tipo_combustivel === 'sem_preco');
+                const comPreco = prev.filter(p => p.tipo_combustivel !== 'sem_preco');
+                const webEntries: FuelPriceItem[] = [];
+                semPreco.forEach(entry => {
+                  Object.entries(FUEL_MAP).forEach(([key, tipoNome]) => {
+                    const preco = (wp.prices as any)[key];
+                    if (preco && typeof preco === 'number' && preco > 0) {
+                      if (!tipo || tipo === 'Todos' || tipo === tipoNome) {
+                        webEntries.push({
+                          id: `web-${key}-${entry.stations.id}`,
+                          tipo_combustivel: tipoNome,
+                          preco,
+                          data_atualizacao: new Date().toISOString(),
+                          reportado_por: 'pesquisa web',
+                          ticket_log: entry.ticket_log,
+                          stations: entry.stations,
+                        });
+                      }
+                    }
+                  });
+                });
+                return [...comPreco, ...webEntries];
+              });
+            })
+            .catch(() => {/* silencioso */})
+            .finally(() => setWebPricesLoading(false));
         }
       } catch {
         showToast('Erro ao buscar dados', 'error');
@@ -494,6 +539,11 @@ export default function Home() {
               🏆 Ranking — {cidade || 'Região GPS'}
               {source && (
                 <span className="text-xs text-gray-600 font-normal ml-2">via {source}</span>
+              )}
+              {webPricesLoading && (
+                <span className="text-xs text-amber-400 font-normal ml-2 animate-pulse">
+                  🌐 buscando preços na web...
+                </span>
               )}
             </div>
 
