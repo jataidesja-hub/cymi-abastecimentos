@@ -22,68 +22,75 @@ const FUEL_MAP: Record<string, string> = {
 // ─── Tavily + Groq: busca preços reais da cidade na web ───────────────────────
 async function getWebPrices(cidade: string): Promise<Record<string, number> | null> {
   if (!TAVILY_KEY || !GROQ_KEY) return null;
-  try {
-    // 1. Pesquisa na web via Tavily
-    const tavilyRes = await fetch('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: TAVILY_KEY,
-        query: `preço combustível gasolina etanol diesel ${cidade} Brasil ${new Date().getFullYear()} ANP posto`,
-        search_depth: 'basic',
-        max_results: 5,
-        include_answer: true,
-      }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!tavilyRes.ok) return null;
-    const tavilyData = await tavilyRes.json();
 
-    const context = [
-      tavilyData.answer || '',
-      ...(tavilyData.results || []).map((r: any) => r.content || '').slice(0, 4),
-    ].join('\n').slice(0, 3000);
+  // Limite total de 8s para caber no timeout do Vercel free (10s)
+  const timeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 8000));
 
-    if (!context.trim()) return null;
+  const searchPromise = (async () => {
+    try {
+      // 1. Tavily: pesquisa na web (timeout 4s)
+      const tavilyRes = await fetch('https://api.tavily.com/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          api_key: TAVILY_KEY,
+          query: `preço gasolina etanol diesel ${cidade} ${new Date().getFullYear()} ANP`,
+          search_depth: 'basic',
+          max_results: 4,
+          include_answer: true,
+        }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (!tavilyRes.ok) return null;
+      const tavilyData = await tavilyRes.json();
 
-    // 2. Groq extrai os preços em JSON estruturado
-    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${GROQ_KEY}`,
-      },
-      body: JSON.stringify({
-        model: 'llama-3.3-70b-versatile',
-        messages: [{
-          role: 'user',
-          content: `Extraia os preços de combustível para ${cidade}, Brasil, do texto abaixo.
-Retorne APENAS um JSON válido (sem markdown, sem explicação).
-Campos: gasolina_comum, gasolina_aditivada, etanol, diesel_s10, diesel_s500, gnv
-Use null para tipos não encontrados. Valores em número decimal (ex: 6.490).
-Se não achar preços de ${cidade} especificamente, use a média regional/estadual mais próxima.
+      const context = [
+        tavilyData.answer || '',
+        ...(tavilyData.results || []).map((r: any) => r.content || '').slice(0, 3),
+      ].join('\n').slice(0, 2000);
 
-Texto:
-${context}
+      if (!context.trim()) return null;
 
-JSON:`,
-        }],
-        temperature: 0.1,
-        max_tokens: 150,
-      }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!groqRes.ok) return null;
+      // 2. Groq: extrai preços em JSON (modelo rápido, timeout 5s)
+      const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${GROQ_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'llama-3.1-8b-instant', // modelo rápido para extração simples
+          messages: [{
+            role: 'user',
+            content: `Do texto abaixo, extraia preços de combustível no Brasil para ${cidade}.
+Retorne SOMENTE JSON válido, sem texto extra.
+Formato: {"gasolina_comum":6.49,"gasolina_aditivada":6.89,"etanol":4.29,"diesel_s10":6.19,"diesel_s500":5.99,"gnv":4.5}
+Use null se não encontrar. Se não há preços de ${cidade}, use a média regional/estadual.
 
-    const groqData = await groqRes.json();
-    const raw = groqData.choices?.[0]?.message?.content?.trim() || '';
-    const jsonMatch = raw.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) return null;
+Texto: ${context}`,
+          }],
+          temperature: 0.1,
+          max_tokens: 120,
+        }),
+        signal: AbortSignal.timeout(5000),
+      });
+      if (!groqRes.ok) return null;
 
-    return JSON.parse(jsonMatch[0]);
-  } catch {
-    return null;
-  }
+      const groqData = await groqRes.json();
+      const raw = groqData.choices?.[0]?.message?.content?.trim() || '';
+      const match = raw.match(/\{[\s\S]*?\}/);
+      if (!match) return null;
+
+      const parsed = JSON.parse(match[0]);
+      // Valida que pelo menos um campo é número válido
+      const hasValid = Object.values(parsed).some(v => typeof v === 'number' && v > 0);
+      return hasValid ? parsed : null;
+    } catch {
+      return null;
+    }
+  })();
+
+  return Promise.race([searchPromise, timeoutPromise]);
 }
 
 // Mirrors do Overpass API — tenta em ordem até um funcionar
