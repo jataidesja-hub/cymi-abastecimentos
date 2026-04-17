@@ -32,6 +32,34 @@ async function queryOverpass(query: string): Promise<any[] | null> {
   return null;
 }
 
+// ─── Fallback: Nominatim busca postos de combustível diretamente ─────────────
+async function getStationsByNominatim(cidade: string): Promise<any[] | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?amenity=fuel&city=${encodeURIComponent(cidade)}&country=Brasil&format=json&limit=40&addressdetails=1`,
+      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(8000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    // Converte formato Nominatim → formato Overpass
+    return data.map((item: any) => ({
+      id: item.osm_id || `nom-${Math.random()}`,
+      lat: parseFloat(item.lat),
+      lon: parseFloat(item.lon),
+      tags: {
+        name: item.display_name?.split(',')[0]?.trim() || 'Posto de Combustível',
+        'addr:street': item.address?.road || '',
+        'addr:housenumber': item.address?.house_number || '',
+        'addr:suburb': item.address?.suburb || item.address?.neighbourhood || '',
+      },
+    }));
+  } catch {
+    return null;
+  }
+}
+
 async function getStationsByCity(cidade: string) {
   const geoRes = await fetch(
     `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1`,
@@ -41,7 +69,13 @@ async function getStationsByCity(cidade: string) {
   if (!geoData[0]?.boundingbox) return null;
   const [south, north, west, east] = geoData[0].boundingbox.map(Number);
   const query = `[out:json][timeout:18];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 80 center;`;
-  return queryOverpass(query);
+
+  const overpassResult = await queryOverpass(query);
+  if (overpassResult !== null) return overpassResult;
+
+  // Overpass falhou — tenta Nominatim como fallback
+  console.log('[FALLBACK] Overpass falhou, tentando Nominatim para:', cidade);
+  return getStationsByNominatim(cidade);
 }
 
 async function getStationsByCoords(lat: number, lon: number) {
@@ -236,9 +270,10 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       data: result,
-      source: osmUnavailable ? 'Supabase (OSM indisponível)' : 'OpenStreetMap + Comunidade',
+      source: osmUnavailable ? 'Pesquisa Web' : 'OpenStreetMap + Comunidade',
       total_osm: osmElements.length,
       osm_unavailable: osmUnavailable,
+      cidade: cidadeFinal,
     });
   } catch (err: any) {
     console.error('[ERRO STATIONS]:', err.message);

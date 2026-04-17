@@ -130,11 +130,12 @@ export default function Home() {
         setPrices(data);
         setSource(json.source || '');
 
-        // Se há postos sem preço, busca estimativas na web em background
+        // Busca preços web sempre que houver postos sem preço OU quando não há postos
         const semPrecoIds = new Set(
           data.filter(d => d.tipo_combustivel === 'sem_preco').map(d => d.stations.id)
         );
-        if (semPrecoIds.size > 0 && cidadeBusca.trim()) {
+        const precisaPrecoWeb = semPrecoIds.size > 0 || data.length === 0;
+        if (precisaPrecoWeb && cidadeBusca.trim()) {
           setWebPricesLoading(true);
           fetch(`/api/web-prices?cidade=${encodeURIComponent(cidadeBusca.trim())}`)
             .then(r => r.json())
@@ -149,28 +150,60 @@ export default function Home() {
                 gnv: 'GNV',
               };
               setPrices(prev => {
-                // Remove entradas sem_preco e adiciona preços web para cada posto
                 const semPreco = prev.filter(p => p.tipo_combustivel === 'sem_preco');
                 const comPreco = prev.filter(p => p.tipo_combustivel !== 'sem_preco');
                 const webEntries: FuelPriceItem[] = [];
-                semPreco.forEach(entry => {
+
+                if (semPreco.length > 0) {
+                  // Aplica preços web nos postos sem preço
+                  semPreco.forEach(entry => {
+                    Object.entries(FUEL_MAP).forEach(([key, tipoNome]) => {
+                      const preco = (wp.prices as any)[key];
+                      if (preco && typeof preco === 'number' && preco > 0) {
+                        if (!tipo || tipo === 'Todos' || tipo === tipoNome) {
+                          webEntries.push({
+                            id: `web-${key}-${entry.stations.id}`,
+                            tipo_combustivel: tipoNome,
+                            preco,
+                            data_atualizacao: new Date().toISOString(),
+                            reportado_por: 'pesquisa web',
+                            ticket_log: entry.ticket_log,
+                            stations: entry.stations,
+                          });
+                        }
+                      }
+                    });
+                  });
+                } else if (prev.length === 0) {
+                  // Nenhum posto encontrado no OSM — cria card de mercado regional
                   Object.entries(FUEL_MAP).forEach(([key, tipoNome]) => {
                     const preco = (wp.prices as any)[key];
                     if (preco && typeof preco === 'number' && preco > 0) {
                       if (!tipo || tipo === 'Todos' || tipo === tipoNome) {
                         webEntries.push({
-                          id: `web-${key}-${entry.stations.id}`,
+                          id: `mercado-${key}`,
                           tipo_combustivel: tipoNome,
                           preco,
                           data_atualizacao: new Date().toISOString(),
                           reportado_por: 'pesquisa web',
-                          ticket_log: entry.ticket_log,
-                          stations: entry.stations,
+                          ticket_log: 'Não',
+                          stations: {
+                            id: 'mercado-regional',
+                            nome: `Mercado — ${cidadeBusca}`,
+                            bandeira: 'Web',
+                            endereco: 'Preço médio pesquisado na internet',
+                            cidade: cidadeBusca,
+                            estado: '',
+                            latitude: 0,
+                            longitude: 0,
+                            ticket_log: false,
+                          },
                         });
                       }
                     }
                   });
-                });
+                }
+
                 return [...comPreco, ...webEntries];
               });
             })
