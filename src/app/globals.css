@@ -275,62 +275,77 @@ body {
 
 /* ===== STATS BAR ===== */
 .stats-bar {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 10px;
+  display: flex;
+  gap: 8px;
   padding: 0 20px 16px;
 }
 
 .stat-card {
+  flex: 1;
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  padding: 12px;
+  border-radius: 14px;
+  padding: 10px 8px;
   text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+
+.stat-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--gradient-2);
+  opacity: 0.4;
 }
 
 .stat-value {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 800;
   background: var(--gradient-2);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  line-height: 1.1;
 }
 
 .stat-label {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-muted);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 /* ===== STATION CARDS ===== */
 .stations-container {
-  padding: 0 20px 100px;
+  padding: 0 16px 100px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
 }
 
 .section-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
   color: var(--text-primary);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .station-card {
   background: var(--bg-card);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius);
-  padding: 16px;
-  transition: all 0.3s ease;
+  border-radius: 18px;
+  padding: 14px 14px 12px;
+  transition: all 0.25s ease;
   position: relative;
   overflow: hidden;
 }
@@ -338,69 +353,56 @@ body {
 .station-card::before {
   content: '';
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
+  top: 0; left: 0; right: 0;
+  height: 2px;
   background: var(--gradient-2);
   opacity: 0;
   transition: opacity 0.3s ease;
 }
 
-.station-card:hover {
-  border-color: var(--border-glow);
-  box-shadow: var(--shadow-glow);
-  transform: translateY(-2px);
-}
-
-.station-card:hover::before {
-  opacity: 1;
-}
+.station-card:active { transform: scale(0.99); }
 
 .station-card.cheapest {
-  border-color: rgba(16, 185, 129, 0.3);
-  box-shadow: 0 4px 24px rgba(16, 185, 129, 0.1);
+  border-color: rgba(16, 185, 129, 0.35);
+  background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, var(--bg-card) 60%);
 }
 
-.station-card.cheapest::before {
-  opacity: 1;
-}
+.station-card.cheapest::before { opacity: 1; }
 
 .cheapest-badge {
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  padding: 3px 10px;
-  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 8px;
+  border-radius: 20px;
   background: rgba(16, 185, 129, 0.15);
   border: 1px solid rgba(16, 185, 129, 0.3);
   color: var(--accent-green);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 9px;
+  font-weight: 800;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  letter-spacing: 0.6px;
+  margin-bottom: 8px;
 }
 
 .station-header {
   display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 12px;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
 .station-brand {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 800;
   flex-shrink: 0;
+  letter-spacing: -0.3px;
 }
 
 .brand-shell { background: linear-gradient(135deg, #facc15, #f97316); color: #000; }
@@ -409,62 +411,143 @@ body {
 .brand-ale { background: linear-gradient(135deg, #ef4444, #dc2626); color: white; }
 .brand-branco { background: linear-gradient(135deg, #64748b, #475569); color: white; }
 
-.station-info h3 {
-  font-size: 15px;
-  font-weight: 700;
-  color: var(--text-primary);
-  margin-bottom: 2px;
+/* ── Price rows list ── */
+.price-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 12px;
+  overflow: hidden;
+  margin-top: 2px;
 }
 
-.station-address {
+.price-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: var(--bg-card);
+  transition: background 0.15s;
+}
+
+.price-row:first-child { border-radius: 12px 12px 0 0; }
+.price-row:last-child { border-radius: 0 0 12px 12px; }
+.price-row:only-child { border-radius: 12px; }
+
+.price-row:hover { background: var(--bg-card-hover); }
+
+.price-row-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.price-row-icon { font-size: 14px; line-height: 1; }
+
+.price-row-label {
   font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.price-row-value {
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.3px;
+}
+
+.price-row-value.green { color: var(--accent-green); }
+.price-row-value.red { color: var(--accent-red); }
+.price-row-value.amber { color: #f59e0b; }
+.price-row-value.normal { color: var(--text-primary); }
+
+.price-row-rs {
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.55;
+  margin-right: 1px;
+}
+
+/* card footer */
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-color);
+}
+
+.card-footer-time {
+  font-size: 10px;
   color: var(--text-muted);
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.station-prices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.price-tag {
-  display: flex;
-  flex-direction: column;
+.card-action-btn {
+  display: inline-flex;
   align-items: center;
-  padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  min-width: 80px;
-}
-
-.price-tag .fuel-name {
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
-  margin-bottom: 4px;
-}
-
-.price-tag .fuel-price {
-  font-size: 18px;
-  font-weight: 800;
-  color: var(--accent-green);
-}
-
-.price-tag .fuel-price.expensive {
-  color: var(--accent-red);
-}
-
-.price-tag .price-currency {
+  gap: 5px;
+  padding: 5px 12px;
+  border-radius: 20px;
+  border: 1px solid rgba(59,130,246,0.25);
+  background: rgba(59,130,246,0.08);
+  color: var(--accent-blue-light);
   font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.2px;
 }
+
+.card-action-btn:hover {
+  background: rgba(59,130,246,0.15);
+  border-color: var(--accent-blue);
+}
+
+.card-action-btn.confirm {
+  border-color: rgba(245,158,11,0.3);
+  background: rgba(245,158,11,0.08);
+  color: #fbbf24;
+}
+
+.card-action-btn.confirm:hover {
+  background: rgba(245,158,11,0.15);
+}
+
+/* no price placeholder */
+.no-price-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px dashed rgba(100,116,139,0.25);
+  border-radius: 12px;
+  margin-top: 4px;
+}
+
+.add-price-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: none;
+  background: var(--gradient-2);
+  color: white;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  transition: opacity 0.2s;
+}
+
+.add-price-btn:hover { opacity: 0.85; }
 
 .price-time {
   font-size: 10px;
@@ -940,12 +1023,11 @@ body {
 /* ===== VIEW TABS (Lista / Mapa) ===== */
 .view-tabs {
   display: flex;
-  margin: 0 20px 16px;
-  background: var(--bg-card);
-  border-radius: 12px;
-  padding: 4px;
-  gap: 4px;
-  border: 1px solid var(--border-color);
+  margin: 0 16px 14px;
+  background: rgba(255,255,255,0.04);
+  border-radius: 14px;
+  padding: 3px;
+  gap: 3px;
 }
 
 .view-tab {
@@ -954,42 +1036,30 @@ body {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  padding: 9px 12px;
-  border-radius: 9px;
+  padding: 8px 12px;
+  border-radius: 11px;
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
-  color: var(--text-secondary);
+  color: var(--text-muted);
   background: transparent;
   border: none;
   font-family: 'Inter', sans-serif;
-  letter-spacing: 0.3px;
 }
 
-.view-tab:hover {
-  color: var(--text-primary);
-  background: rgba(255,255,255,0.05);
-}
+.view-tab:hover { color: var(--text-secondary); }
 
 .view-tab.active {
-  background: var(--bg-secondary);
+  background: var(--bg-card);
   color: var(--text-primary);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  box-shadow: 0 2px 10px rgba(0,0,0,0.35);
 }
 
-.view-tab.active.lista {
-  color: var(--accent-green);
-}
+.view-tab.active.lista { color: var(--accent-green); }
+.view-tab.active.mapa  { color: var(--accent-blue); }
 
-.view-tab.active.mapa {
-  color: var(--accent-blue);
-}
-
-.view-tab-icon {
-  font-size: 15px;
-  line-height: 1;
-}
+.view-tab-icon { font-size: 14px; line-height: 1; }
 
 /* ===== TICKET LOG TOGGLE ===== */
 .ticket-log-toggle {

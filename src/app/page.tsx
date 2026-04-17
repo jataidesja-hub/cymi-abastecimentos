@@ -582,6 +582,7 @@ export default function Home() {
 
             {groupedStations.map((g, i) => {
               const hasPrices = g.prices.length > 0;
+              const isWeb = g.prices.some(p => p.fonte === 'pesquisa web');
               const isTicketLog =
                 g.station.ticket_log ||
                 prices.find(p => p.stations.id === g.station.id)?.ticket_log === 'Sim';
@@ -600,92 +601,70 @@ export default function Home() {
                     <div className={`station-brand ${getBrandClass(g.station.bandeira)}`}>
                       {getBrandInitials(g.station.bandeira)}
                     </div>
-                    <div className="station-info flex-1 min-w-0">
+                    <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="m-0 text-base font-bold text-white truncate">
+                        <span className="text-sm font-bold text-white truncate leading-tight">
                           {g.station.nome}
-                        </h3>
+                        </span>
                         {isTicketLog && (
-                          <span className="bg-blue-600 text-[10px] text-white px-2 py-0.5 rounded font-bold uppercase tracking-wider shrink-0">
+                          <span className="text-[9px] bg-blue-500/20 text-blue-400 border border-blue-500/30 px-2 py-0.5 rounded-full font-bold uppercase tracking-wider shrink-0">
                             🎫 TL
                           </span>
                         )}
                       </div>
-                      <div className="text-xs text-gray-500 mt-0.5 truncate">
+                      <div className="text-[11px] text-gray-500 mt-0.5 truncate">
                         📍 {g.station.endereco}
                       </div>
                     </div>
                   </div>
 
-                  {/* Preços ou placeholder */}
+                  {/* Preços */}
                   {hasPrices ? (
                     <>
-                      {g.prices.some(p => p.fonte === 'pesquisa web') && (
-                        <div className="mt-3 flex items-center gap-1.5 text-[10px] text-amber-400/80 font-medium">
+                      {isWeb && (
+                        <div className="flex items-center gap-1.5 mb-2 text-[10px] text-amber-400/70 font-medium">
                           <span>🌐</span>
-                          <span>Preço estimado para a região via pesquisa web — confirme no posto</span>
+                          <span>Estimativa regional — confirme no posto</span>
                         </div>
                       )}
-                      <div className="station-prices mt-2 flex flex-wrap gap-2">
+                      <div className="price-list">
                         {g.prices.map(p => {
-                          const isWeb = p.fonte === 'pesquisa web';
-                          const isCheapest = stats.menorPreco > 0 && p.preco === stats.menorPreco;
-                          const isMostExpensive =
-                            stats.maiorPreco > 0 &&
-                            p.preco === stats.maiorPreco &&
-                            stats.totalPostos > 1;
-                          const priceColor = isWeb
-                            ? 'text-amber-400'
-                            : isCheapest
-                            ? 'text-green-400'
-                            : isMostExpensive
-                            ? 'text-red-500'
-                            : 'text-gray-300';
-
+                          const pIsWeb = p.fonte === 'pesquisa web';
+                          const isCheapestPrice = stats.menorPreco > 0 && p.preco === stats.menorPreco;
+                          const isMostExp = stats.maiorPreco > 0 && p.preco === stats.maiorPreco && stats.totalPostos > 1;
+                          const colorClass = pIsWeb ? 'amber' : isCheapestPrice ? 'green' : isMostExp ? 'red' : 'normal';
+                          const fuelIcon = FUEL_ICONS[p.tipo] || '⛽';
                           return (
-                            <div
-                              key={p.tipo}
-                              className={`price-tag bg-gray-900/80 border ${
-                                isWeb
-                                  ? 'border-amber-500/20'
-                                  : isCheapest
-                                  ? 'border-green-500/30'
-                                  : 'border-gray-700/50'
-                              } p-2 rounded-lg flex flex-col min-w-[100px]`}
-                            >
-                              <span className="text-[10px] uppercase text-gray-500 font-bold">
-                                {p.tipo.replace('Gasolina ', 'Gas. ')}
-                              </span>
-                              <span className={`${priceColor} font-bold text-sm`}>
-                                <span className="text-[10px] font-normal mr-0.5 opacity-60">R$</span>
-                                {p.preco.toFixed(3)}
+                            <div key={p.tipo} className="price-row">
+                              <div className="price-row-left">
+                                <span className="price-row-icon">{fuelIcon}</span>
+                                <span className="price-row-label">{p.tipo}</span>
+                              </div>
+                              <span className={`price-row-value ${colorClass}`}>
+                                <span className="price-row-rs">R$</span>
+                                {p.preco.toFixed(2)}
                               </span>
                             </div>
                           );
                         })}
                       </div>
-                      <div className="flex items-center justify-between mt-3">
-                        <div className="text-[10px] text-gray-500 italic">
-                          {g.prices[0].fonte === 'pesquisa web'
-                            ? '🌐 Atualizado agora via web'
-                            : `🕐 ${timeAgo(g.prices[0].data)}`}
-                        </div>
+                      <div className="card-footer">
+                        <span className="card-footer-time">
+                          {isWeb ? '🌐 via pesquisa web' : `🕐 ${timeAgo(g.prices[0].data)}`}
+                        </span>
                         <button
-                          className="text-[11px] text-blue-400 hover:text-blue-300 font-medium transition-colors"
+                          className={`card-action-btn ${isWeb ? 'confirm' : ''}`}
                           onClick={() => openReport(g.station)}
                         >
-                          📝 {g.prices[0].fonte === 'pesquisa web' ? 'Confirmar preço real' : 'Atualizar preço'}
+                          {isWeb ? '✓ Confirmar' : '✏️ Atualizar'}
                         </button>
                       </div>
                     </>
                   ) : (
-                    <div className="mt-3 p-3 bg-gray-900/50 border border-dashed border-gray-700 rounded-lg flex items-center justify-between gap-3">
+                    <div className="no-price-row">
                       <span className="text-xs text-gray-500">Sem preço cadastrado</span>
-                      <button
-                        className="text-xs bg-green-700 hover:bg-green-600 text-white px-3 py-1.5 rounded-lg font-bold transition-colors shrink-0"
-                        onClick={() => openReport(g.station)}
-                      >
-                        + Reportar preço
+                      <button className="add-price-btn" onClick={() => openReport(g.station)}>
+                        + Adicionar
                       </button>
                     </div>
                   )}
