@@ -6,7 +6,7 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// ─── Overpass mirrors ─────────────────────────────────────────────────────────
+// ─── Overpass: tenta os 3 mirrors em paralelo e pega o mais rápido ────────────
 const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
   'https://overpass.kumi.systems/api/interpreter',
@@ -14,45 +14,49 @@ const OVERPASS_MIRRORS = [
 ];
 
 async function queryOverpass(query: string): Promise<any[] | null> {
-  for (const mirror of OVERPASS_MIRRORS) {
-    try {
-      const res = await fetch(mirror, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: `data=${encodeURIComponent(query)}`,
-        signal: AbortSignal.timeout(18000),
-      });
-      if (!res.ok) continue;
-      const data = await res.json();
-      return data.elements as any[];
-    } catch {
-      // tenta próximo mirror
-    }
+  const attempts = OVERPASS_MIRRORS.map(mirror =>
+    fetch(mirror, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(7000),
+    })
+      .then(r => (r.ok ? r.json() : Promise.reject('not ok')))
+      .then(d => {
+        if (!Array.isArray(d.elements)) throw new Error('no elements');
+        return d.elements as any[];
+      })
+  );
+
+  try {
+    // Promise.any = primeiro que RESOLVE (ignora rejeições)
+    return await Promise.any(attempts);
+  } catch {
+    return null;
   }
-  return null;
 }
 
-// ─── Fallback: Nominatim busca postos de combustível diretamente ─────────────
+// ─── Nominatim: busca postos diretamente (fallback quando Overpass falha) ─────
 async function getStationsByNominatim(cidade: string): Promise<any[] | null> {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/search?amenity=fuel&city=${encodeURIComponent(cidade)}&country=Brasil&format=json&limit=40&addressdetails=1`,
-      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(8000) }
+      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(5000) }
     );
     if (!res.ok) return null;
     const data = await res.json();
     if (!Array.isArray(data) || data.length === 0) return null;
 
-    // Converte formato Nominatim → formato Overpass
     return data.map((item: any) => ({
       id: item.osm_id || `nom-${Math.random()}`,
       lat: parseFloat(item.lat),
       lon: parseFloat(item.lon),
       tags: {
-        name: item.display_name?.split(',')[0]?.trim() || 'Posto de Combustível',
+        name: item.display_name?.split(',')[0]?.trim() || '',
         'addr:street': item.address?.road || '',
         'addr:housenumber': item.address?.house_number || '',
         'addr:suburb': item.address?.suburb || item.address?.neighbourhood || '',
+        brand: '',
       },
     }));
   } catch {
@@ -60,103 +64,76 @@ async function getStationsByNominatim(cidade: string): Promise<any[] | null> {
   }
 }
 
-async function getStationsByCity(cidade: string) {
-  const geoRes = await fetch(
-    `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1`,
-    { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(8000) }
-  );
-  const geoData = await geoRes.json();
-  if (!geoData[0]?.boundingbox) return null;
-  const [south, north, west, east] = geoData[0].boundingbox.map(Number);
-  const query = `[out:json][timeout:18];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 80 center;`;
+async function getStationsByCity(cidade: string): Promise<any[] | null> {
+  // 1. Geocode da cidade (máx 4s)
+  let bbox: number[] | null = null;
+  try {
+    const geoRes = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1`,
+      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
+    );
+    const geoData = await geoRes.json();
+    if (geoData[0]?.boundingbox) {
+      bbox = geoData[0].boundingbox.map(Number);
+    }
+  } catch {
+    // continua sem bbox
+  }
 
-  const overpassResult = await queryOverpass(query);
-  if (overpassResult !== null) return overpassResult;
+  if (bbox) {
+    const [south, north, west, east] = bbox;
+    const query = `[out:json][timeout:7];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 60 center;`;
+    const overpassResult = await queryOverpass(query);
+    if (overpassResult !== null) return overpassResult;
+  }
 
-  // Overpass falhou — tenta Nominatim como fallback
-  console.log('[FALLBACK] Overpass falhou, tentando Nominatim para:', cidade);
+  // Overpass falhou → Nominatim como fallback
   return getStationsByNominatim(cidade);
 }
 
-async function getStationsByCoords(lat: number, lon: number) {
-  const query = `[out:json][timeout:18];(node["amenity"="fuel"](around:6000,${lat},${lon});way["amenity"="fuel"](around:6000,${lat},${lon}););out 80 center;`;
+async function getStationsByCoords(lat: number, lon: number): Promise<any[] | null> {
+  const query = `[out:json][timeout:7];(node["amenity"="fuel"](around:6000,${lat},${lon});way["amenity"="fuel"](around:6000,${lat},${lon}););out 60 center;`;
   return queryOverpass(query);
 }
 
+// ─── Helpers de exibição ──────────────────────────────────────────────────────
 function normalizeBrand(brand: string): string {
   if (!brand) return 'Branco';
   const b = brand.toLowerCase().trim();
-  if (b === 'shell' || b.includes('raizen') || b.includes('raízen')) return 'Shell';
-  if (b === 'ipiranga' || b.includes('vibra')) return 'Ipiranga';
-  if (b === 'petrobras' || b === 'br' || b === 'posto br' || b === 'petrobras distribuidora') return 'Petrobras';
-  if (b === 'ale' || b.includes('alérgico') ) return 'Ale';
-  if (b.includes('ale ')) return 'Ale';
-  if (b.includes('shell')) return 'Shell';
-  if (b.includes('ipiranga')) return 'Ipiranga';
-  if (b.includes('petrobras')) return 'Petrobras';
+  if (b === 'shell' || b.includes('raizen') || b.includes('raízen') || b.includes('shell')) return 'Shell';
+  if (b === 'ipiranga' || b.includes('vibra') || b.includes('ipiranga')) return 'Ipiranga';
+  if (b === 'petrobras' || b === 'br' || b.includes('petrobras')) return 'Petrobras';
+  if (b === 'ale' || b.startsWith('ale ') || b.includes(' ale')) return 'Ale';
   return brand;
 }
 
-// Gera nome de exibição inteligente a partir das tags OSM
 function buildName(tags: Record<string, string>): string {
-  // Nome explícito tem prioridade
   const name = tags.name || tags['name:pt'] || tags['official_name'];
-  if (name && name.length > 2 && name.toLowerCase() !== (tags.brand || '').toLowerCase()) {
+  const brandRaw = tags.brand || tags['brand:pt'] || '';
+  const brandNorm = normalizeBrand(brandRaw);
+
+  // Nome explícito que não é só o código da bandeira
+  if (name && name.length > 2 && name.toLowerCase() !== brandRaw.toLowerCase()) {
     return name;
   }
-  // Se só tem brand, monta "Posto [Bandeira]"
-  const brand = normalizeBrand(tags.brand || tags['brand:pt'] || '');
-  if (brand && brand !== 'Branco') return `Posto ${brand}`;
+  // Sem nome → "Posto [Bandeira]"
+  if (brandNorm && brandNorm !== 'Branco') return `Posto ${brandNorm}`;
   if (name && name.length > 0) return name;
   return 'Posto de Combustível';
 }
 
-function buildAddress(tags: Record<string, string>): string {
+function buildAddress(tags: Record<string, string>, cidadeFallback: string): string {
   const street = tags['addr:street'];
   const number = tags['addr:housenumber'];
   const neighborhood = tags['addr:suburb'] || tags['addr:neighbourhood'] || tags['addr:district'];
   const city = tags['addr:city'];
+
   if (street) return [street, number, neighborhood].filter(Boolean).join(', ');
   if (tags['addr:full']) return tags['addr:full'];
   if (neighborhood && city) return `${neighborhood}, ${city}`;
-  if (neighborhood) return neighborhood;
-  return '';  // vazio → vai para reverse geocode
-}
-
-// Reverse geocode em lote (máx 6 em paralelo, Nominatim aceita 1/s mas em servidor é ok)
-async function reverseGeocodeMany(
-  items: { id: string; lat: number; lon: number }[]
-): Promise<Map<string, string>> {
-  const result = new Map<string, string>();
-  // Processa em grupos de 4 para não sobrecarregar
-  const BATCH = 4;
-  for (let i = 0; i < items.length; i += BATCH) {
-    const batch = items.slice(i, i + BATCH);
-    await Promise.all(
-      batch.map(async item => {
-        try {
-          const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${item.lat}&lon=${item.lon}&format=json&zoom=17&addressdetails=1&accept-language=pt-BR`,
-            { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
-          );
-          if (!res.ok) return;
-          const data = await res.json();
-          const addr = data.address || {};
-          const road = addr.road || addr.pedestrian || addr.footway || '';
-          const num = addr.house_number || '';
-          const suburb = addr.suburb || addr.neighbourhood || addr.quarter || '';
-          if (road) {
-            result.set(item.id, [road, num, suburb].filter(Boolean).join(', '));
-          } else if (suburb) {
-            result.set(item.id, suburb);
-          }
-        } catch {
-          // silencioso
-        }
-      })
-    );
-  }
-  return result;
+  if (neighborhood) return `${neighborhood}, ${cidadeFallback}`;
+  // Último recurso: só cidade
+  return cidadeFallback;
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -229,22 +206,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 4. Reverse geocode postos sem endereço (máx 12 para não atrasar demais)
-    const needsGeo: { id: string; lat: number; lon: number }[] = [];
-    for (const el of osmElements.slice(0, 20)) {
-      const lat = el.lat ?? el.center?.lat;
-      const lon = el.lon ?? el.center?.lon;
-      if (!lat || !lon) continue;
-      const tags = el.tags || {};
-      if (!buildAddress(tags)) {
-        needsGeo.push({ id: String(el.id), lat, lon });
-      }
-    }
-    const geocodedAddresses = needsGeo.length > 0
-      ? await reverseGeocodeMany(needsGeo.slice(0, 12))
-      : new Map<string, string>();
-
-    // 5. Monta resposta
+    // 4. Monta resposta
     const result: any[] = [];
     const seenIds = new Set<string>();
 
@@ -256,8 +218,7 @@ export async function GET(request: NextRequest) {
       const tags = el.tags || {};
       const nome = buildName(tags);
       const bandeira = normalizeBrand(tags.brand || tags['brand:pt'] || '');
-      const osmAddr = buildAddress(tags);
-      const endereco = osmAddr || geocodedAddresses.get(String(el.id)) || 'Endereço não cadastrado';
+      const endereco = buildAddress(tags, cidadeFinal);
       const ticketLogOsm = tags['payment:ticketlog'] === 'yes';
 
       const dbStation = osmIdToDb.get(el.id);
