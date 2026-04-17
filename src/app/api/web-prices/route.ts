@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+export const maxDuration = 25;
+
 const TAVILY_KEY = process.env.TAVILY_API_KEY;
 const GROQ_KEY = process.env.GROQ_API_KEY;
 

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Vercel: aumenta o timeout máximo desta rota para 25s (Hobby plan suporta até 60s)
+export const maxDuration = 25;
+
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
@@ -19,7 +22,7 @@ async function queryOverpass(query: string): Promise<any[] | null> {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: `data=${encodeURIComponent(query)}`,
-      signal: AbortSignal.timeout(7000),
+      signal: AbortSignal.timeout(5000),
     })
       .then(r => (r.ok ? r.json() : Promise.reject('not ok')))
       .then(d => {
@@ -65,30 +68,33 @@ async function getStationsByNominatim(cidade: string): Promise<any[] | null> {
 }
 
 async function getStationsByCity(cidade: string): Promise<any[] | null> {
-  // 1. Geocode da cidade (máx 4s)
+  // Inicia ambas as buscas em paralelo: bbox geocode + Nominatim por amenidade
+  // Assim, se Overpass falhar, o resultado do Nominatim já está pronto
+  const nominatimPromise = getStationsByNominatim(cidade); // começa agora
+
   let bbox: number[] | null = null;
   try {
     const geoRes = await fetch(
       `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1`,
-      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
+      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(3500) }
     );
     const geoData = await geoRes.json();
     if (geoData[0]?.boundingbox) {
       bbox = geoData[0].boundingbox.map(Number);
     }
   } catch {
-    // continua sem bbox
+    // sem bbox, usa só Nominatim
   }
 
   if (bbox) {
     const [south, north, west, east] = bbox;
-    const query = `[out:json][timeout:7];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 60 center;`;
-    const overpassResult = await queryOverpass(query);
-    if (overpassResult !== null) return overpassResult;
+    const query = `[out:json][timeout:5];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 60 center;`;
+    const overpassResult = await queryOverpass(query); // 5s timeout por mirror
+    if (overpassResult !== null && overpassResult.length > 0) return overpassResult;
   }
 
-  // Overpass falhou → Nominatim como fallback
-  return getStationsByNominatim(cidade);
+  // Overpass falhou — Nominatim já estava rodando em paralelo, só aguarda o resultado
+  return nominatimPromise;
 }
 
 async function getStationsByCoords(lat: number, lon: number): Promise<any[] | null> {
