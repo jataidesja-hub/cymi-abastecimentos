@@ -85,21 +85,78 @@ async function getStationsByCoords(lat: number, lon: number) {
 
 function normalizeBrand(brand: string): string {
   if (!brand) return 'Branco';
-  const b = brand.toLowerCase();
-  if (b.includes('shell') || b.includes('raizen') || b.includes('raízen')) return 'Shell';
-  if (b.includes('ipiranga') || b.includes('vibra')) return 'Ipiranga';
-  if (b.includes('petrobras') || b === 'br') return 'Petrobras';
-  if (b.includes('ale')) return 'Ale';
+  const b = brand.toLowerCase().trim();
+  if (b === 'shell' || b.includes('raizen') || b.includes('raízen')) return 'Shell';
+  if (b === 'ipiranga' || b.includes('vibra')) return 'Ipiranga';
+  if (b === 'petrobras' || b === 'br' || b === 'posto br' || b === 'petrobras distribuidora') return 'Petrobras';
+  if (b === 'ale' || b.includes('alérgico') ) return 'Ale';
+  if (b.includes('ale ')) return 'Ale';
+  if (b.includes('shell')) return 'Shell';
+  if (b.includes('ipiranga')) return 'Ipiranga';
+  if (b.includes('petrobras')) return 'Petrobras';
   return brand;
+}
+
+// Gera nome de exibição inteligente a partir das tags OSM
+function buildName(tags: Record<string, string>): string {
+  // Nome explícito tem prioridade
+  const name = tags.name || tags['name:pt'] || tags['official_name'];
+  if (name && name.length > 2 && name.toLowerCase() !== (tags.brand || '').toLowerCase()) {
+    return name;
+  }
+  // Se só tem brand, monta "Posto [Bandeira]"
+  const brand = normalizeBrand(tags.brand || tags['brand:pt'] || '');
+  if (brand && brand !== 'Branco') return `Posto ${brand}`;
+  if (name && name.length > 0) return name;
+  return 'Posto de Combustível';
 }
 
 function buildAddress(tags: Record<string, string>): string {
   const street = tags['addr:street'];
   const number = tags['addr:housenumber'];
-  const neighborhood = tags['addr:suburb'] || tags['addr:neighbourhood'];
+  const neighborhood = tags['addr:suburb'] || tags['addr:neighbourhood'] || tags['addr:district'];
+  const city = tags['addr:city'];
   if (street) return [street, number, neighborhood].filter(Boolean).join(', ');
   if (tags['addr:full']) return tags['addr:full'];
-  return 'Endereço não cadastrado';
+  if (neighborhood && city) return `${neighborhood}, ${city}`;
+  if (neighborhood) return neighborhood;
+  return '';  // vazio → vai para reverse geocode
+}
+
+// Reverse geocode em lote (máx 6 em paralelo, Nominatim aceita 1/s mas em servidor é ok)
+async function reverseGeocodeMany(
+  items: { id: string; lat: number; lon: number }[]
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  // Processa em grupos de 4 para não sobrecarregar
+  const BATCH = 4;
+  for (let i = 0; i < items.length; i += BATCH) {
+    const batch = items.slice(i, i + BATCH);
+    await Promise.all(
+      batch.map(async item => {
+        try {
+          const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${item.lat}&lon=${item.lon}&format=json&zoom=17&addressdetails=1&accept-language=pt-BR`,
+            { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
+          );
+          if (!res.ok) return;
+          const data = await res.json();
+          const addr = data.address || {};
+          const road = addr.road || addr.pedestrian || addr.footway || '';
+          const num = addr.house_number || '';
+          const suburb = addr.suburb || addr.neighbourhood || addr.quarter || '';
+          if (road) {
+            result.set(item.id, [road, num, suburb].filter(Boolean).join(', '));
+          } else if (suburb) {
+            result.set(item.id, suburb);
+          }
+        } catch {
+          // silencioso
+        }
+      })
+    );
+  }
+  return result;
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -172,7 +229,22 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // 4. Monta resposta
+    // 4. Reverse geocode postos sem endereço (máx 12 para não atrasar demais)
+    const needsGeo: { id: string; lat: number; lon: number }[] = [];
+    for (const el of osmElements.slice(0, 20)) {
+      const lat = el.lat ?? el.center?.lat;
+      const lon = el.lon ?? el.center?.lon;
+      if (!lat || !lon) continue;
+      const tags = el.tags || {};
+      if (!buildAddress(tags)) {
+        needsGeo.push({ id: String(el.id), lat, lon });
+      }
+    }
+    const geocodedAddresses = needsGeo.length > 0
+      ? await reverseGeocodeMany(needsGeo.slice(0, 12))
+      : new Map<string, string>();
+
+    // 5. Monta resposta
     const result: any[] = [];
     const seenIds = new Set<string>();
 
@@ -182,9 +254,10 @@ export async function GET(request: NextRequest) {
       if (!lat || !lon) continue;
 
       const tags = el.tags || {};
-      const nome = tags.name || tags['name:pt'] || tags.brand || 'Posto de Combustível';
+      const nome = buildName(tags);
       const bandeira = normalizeBrand(tags.brand || tags['brand:pt'] || '');
-      const endereco = buildAddress(tags);
+      const osmAddr = buildAddress(tags);
+      const endereco = osmAddr || geocodedAddresses.get(String(el.id)) || 'Endereço não cadastrado';
       const ticketLogOsm = tags['payment:ticketlog'] === 'yes';
 
       const dbStation = osmIdToDb.get(el.id);
