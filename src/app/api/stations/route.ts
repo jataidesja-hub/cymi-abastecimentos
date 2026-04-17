@@ -6,6 +6,86 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+const TAVILY_KEY = process.env.TAVILY_API_KEY;
+const GROQ_KEY = process.env.GROQ_API_KEY;
+
+// Mapeamento de chaves JSON → tipo de combustível do app
+const FUEL_MAP: Record<string, string> = {
+  gasolina_comum: 'Gasolina Comum',
+  gasolina_aditivada: 'Gasolina Aditivada',
+  etanol: 'Etanol',
+  diesel_s10: 'Diesel S10',
+  diesel_s500: 'Diesel S500',
+  gnv: 'GNV',
+};
+
+// ─── Tavily + Groq: busca preços reais da cidade na web ───────────────────────
+async function getWebPrices(cidade: string): Promise<Record<string, number> | null> {
+  if (!TAVILY_KEY || !GROQ_KEY) return null;
+  try {
+    // 1. Pesquisa na web via Tavily
+    const tavilyRes = await fetch('https://api.tavily.com/search', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: TAVILY_KEY,
+        query: `preço combustível gasolina etanol diesel ${cidade} Brasil ${new Date().getFullYear()} ANP posto`,
+        search_depth: 'basic',
+        max_results: 5,
+        include_answer: true,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!tavilyRes.ok) return null;
+    const tavilyData = await tavilyRes.json();
+
+    const context = [
+      tavilyData.answer || '',
+      ...(tavilyData.results || []).map((r: any) => r.content || '').slice(0, 4),
+    ].join('\n').slice(0, 3000);
+
+    if (!context.trim()) return null;
+
+    // 2. Groq extrai os preços em JSON estruturado
+    const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${GROQ_KEY}`,
+      },
+      body: JSON.stringify({
+        model: 'llama-3.3-70b-versatile',
+        messages: [{
+          role: 'user',
+          content: `Extraia os preços de combustível para ${cidade}, Brasil, do texto abaixo.
+Retorne APENAS um JSON válido (sem markdown, sem explicação).
+Campos: gasolina_comum, gasolina_aditivada, etanol, diesel_s10, diesel_s500, gnv
+Use null para tipos não encontrados. Valores em número decimal (ex: 6.490).
+Se não achar preços de ${cidade} especificamente, use a média regional/estadual mais próxima.
+
+Texto:
+${context}
+
+JSON:`,
+        }],
+        temperature: 0.1,
+        max_tokens: 150,
+      }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!groqRes.ok) return null;
+
+    const groqData = await groqRes.json();
+    const raw = groqData.choices?.[0]?.message?.content?.trim() || '';
+    const jsonMatch = raw.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) return null;
+
+    return JSON.parse(jsonMatch[0]);
+  } catch {
+    return null;
+  }
+}
+
 // Mirrors do Overpass API — tenta em ordem até um funcionar
 const OVERPASS_MIRRORS = [
   'https://overpass-api.de/api/interpreter',
@@ -104,22 +184,17 @@ export async function GET(request: NextRequest) {
     const cidadeFinal = cidade || 'Região GPS';
     const osmIds = osmElements.map((e: any) => e.id);
 
-    // 2. Busca no Supabase postos já cadastrados pelo osm_id
-    const { data: dbByOsmId } = await supabase
-      .from('stations')
-      .select('*')
-      .in('osm_id', osmIds);
+    // 2. Supabase + pesquisa web em paralelo (não bloqueia um ao outro)
+    const [{ data: dbByOsmId }, { data: dbByCity }, webPrices] = await Promise.all([
+      supabase.from('stations').select('*').in('osm_id', osmIds),
+      supabase.from('stations').select('*').ilike('cidade', `%${cidadeFinal}%`),
+      getWebPrices(cidadeFinal),
+    ]);
 
     const osmIdToDb = new Map<number, any>();
     (dbByOsmId || []).forEach((s: any) => {
       if (s.osm_id != null) osmIdToDb.set(Number(s.osm_id), s);
     });
-
-    // 3. Busca postos da cidade que foram inseridos manualmente (sem osm_id)
-    const { data: dbByCity } = await supabase
-      .from('stations')
-      .select('*')
-      .ilike('cidade', `%${cidadeFinal}%`);
 
     const dbIdToStation = new Map<string, any>();
     (dbByCity || []).forEach((s: any) => dbIdToStation.set(s.id, s));
@@ -206,8 +281,40 @@ export async function GET(request: NextRequest) {
             stations: stationInfo,
           });
         });
+      } else if (webPrices) {
+        // Usa preços encontrados na web como estimativa regional
+        let adicionou = false;
+        Object.entries(FUEL_MAP).forEach(([key, tipoNome]) => {
+          const preco = (webPrices as any)[key];
+          if (preco && typeof preco === 'number' && preco > 0) {
+            if (!tipo || tipo === 'Todos' || tipo === tipoNome) {
+              result.push({
+                id: `web-${key}-${el.id}`,
+                tipo_combustivel: tipoNome,
+                preco,
+                data_atualizacao: new Date().toISOString(),
+                reportado_por: 'pesquisa web',
+                ticket_log: ticketLog ? 'Sim' : 'Não',
+                stations: stationInfo,
+              });
+              adicionou = true;
+            }
+          }
+        });
+        // Se a web não retornou nenhum preço válido, mostra sem preço
+        if (!adicionou) {
+          result.push({
+            id: `sem-preco-${el.id}`,
+            tipo_combustivel: 'sem_preco',
+            preco: 0,
+            data_atualizacao: new Date().toISOString(),
+            reportado_por: 'OpenStreetMap',
+            ticket_log: ticketLog ? 'Sim' : 'Não',
+            stations: stationInfo,
+          });
+        }
       } else {
-        // Posto real encontrado, mas sem preço ainda
+        // Sem web e sem Supabase
         result.push({
           id: `sem-preco-${el.id}`,
           tipo_combustivel: 'sem_preco',

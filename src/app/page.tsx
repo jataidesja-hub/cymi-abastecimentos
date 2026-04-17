@@ -37,7 +37,7 @@ interface FuelPriceItem {
 
 interface GroupedStation {
   station: Station;
-  prices: { tipo: string; preco: number; data: string }[];
+  prices: { tipo: string; preco: number; data: string; fonte: string }[];
 }
 
 const FUEL_TYPES = ['Todos', 'Gasolina Comum', 'Gasolina Aditivada', 'Etanol', 'Diesel S10', 'Diesel S500', 'GNV'];
@@ -267,6 +267,7 @@ export default function Home() {
           tipo: p.tipo_combustivel,
           preco: p.preco,
           data: p.data_atualizacao,
+          fonte: p.reportado_por || 'comunidade',
         });
       }
     });
@@ -536,15 +537,23 @@ export default function Home() {
                   {/* Preços ou placeholder */}
                   {hasPrices ? (
                     <>
-                      <div className="station-prices mt-3 flex flex-wrap gap-2">
+                      {g.prices.some(p => p.fonte === 'pesquisa web') && (
+                        <div className="mt-3 flex items-center gap-1.5 text-[10px] text-amber-400/80 font-medium">
+                          <span>🌐</span>
+                          <span>Preço estimado para a região via pesquisa web — confirme no posto</span>
+                        </div>
+                      )}
+                      <div className="station-prices mt-2 flex flex-wrap gap-2">
                         {g.prices.map(p => {
-                          const isCheapest =
-                            stats.menorPreco > 0 && p.preco === stats.menorPreco;
+                          const isWeb = p.fonte === 'pesquisa web';
+                          const isCheapest = stats.menorPreco > 0 && p.preco === stats.menorPreco;
                           const isMostExpensive =
                             stats.maiorPreco > 0 &&
                             p.preco === stats.maiorPreco &&
                             stats.totalPostos > 1;
-                          const priceColor = isCheapest
+                          const priceColor = isWeb
+                            ? 'text-amber-400'
+                            : isCheapest
                             ? 'text-green-400'
                             : isMostExpensive
                             ? 'text-red-500'
@@ -554,16 +563,18 @@ export default function Home() {
                             <div
                               key={p.tipo}
                               className={`price-tag bg-gray-900/80 border ${
-                                isCheapest ? 'border-green-500/30' : 'border-gray-700/50'
+                                isWeb
+                                  ? 'border-amber-500/20'
+                                  : isCheapest
+                                  ? 'border-green-500/30'
+                                  : 'border-gray-700/50'
                               } p-2 rounded-lg flex flex-col min-w-[100px]`}
                             >
                               <span className="text-[10px] uppercase text-gray-500 font-bold">
                                 {p.tipo.replace('Gasolina ', 'Gas. ')}
                               </span>
                               <span className={`${priceColor} font-bold text-sm`}>
-                                <span className="text-[10px] font-normal mr-0.5 opacity-60">
-                                  R$
-                                </span>
+                                <span className="text-[10px] font-normal mr-0.5 opacity-60">R$</span>
                                 {p.preco.toFixed(3)}
                               </span>
                             </div>
@@ -572,13 +583,15 @@ export default function Home() {
                       </div>
                       <div className="flex items-center justify-between mt-3">
                         <div className="text-[10px] text-gray-500 italic">
-                          🕐 {timeAgo(g.prices[0].data)}
+                          {g.prices[0].fonte === 'pesquisa web'
+                            ? '🌐 Atualizado agora via web'
+                            : `🕐 ${timeAgo(g.prices[0].data)}`}
                         </div>
                         <button
                           className="text-[11px] text-blue-400 hover:text-blue-300 font-medium transition-colors"
                           onClick={() => openReport(g.station)}
                         >
-                          📝 Atualizar preço
+                          📝 {g.prices[0].fonte === 'pesquisa web' ? 'Confirmar preço real' : 'Atualizar preço'}
                         </button>
                       </div>
                     </>
