@@ -76,7 +76,7 @@ function timeAgo(dateStr: string): string {
 export default function Home() {
   const [cidade, setCidade] = useState('');
   const [activeFuel, setActiveFuel] = useState('Todos');
-  const [ticketLogOnly, setTicketLogOnly] = useState(false);
+  const [ticketLogOnly, setTicketLogOnly] = useState(false); // eslint-disable-line
   const [prices, setPrices] = useState<FuelPriceItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
@@ -373,17 +373,29 @@ export default function Home() {
     [prices]
   );
 
-  const stats = useMemo(() => ({
-    totalPostos: groupedStations.length,
-    comPreco: groupedStations.filter(g => g.prices.length > 0).length,
-    semPreco: groupedStations.filter(g => g.prices.length === 0).length,
-    menorPreco: realPrices.length > 0 ? Math.min(...realPrices.map(p => p.preco)) : 0,
-    maiorPreco: realPrices.length > 0 ? Math.max(...realPrices.map(p => p.preco)) : 0,
-    menorTipo:
-      realPrices.length > 0
+  const stats = useMemo(() => {
+    const etanolList = realPrices.filter(p => p.tipo_combustivel === 'Etanol').map(p => p.preco);
+    const gasolinaList = realPrices.filter(p => p.tipo_combustivel === 'Gasolina Comum').map(p => p.preco);
+    const avgEtanol = etanolList.length ? etanolList.reduce((a, b) => a + b, 0) / etanolList.length : 0;
+    const avgGasolina = gasolinaList.length ? gasolinaList.reduce((a, b) => a + b, 0) / gasolinaList.length : 0;
+    const ratio = avgEtanol > 0 && avgGasolina > 0 ? (avgEtanol / avgGasolina) * 100 : 0;
+
+    return {
+      totalPostos: groupedStations.length,
+      comPreco: groupedStations.filter(g => g.prices.length > 0).length,
+      semPreco: groupedStations.filter(g => g.prices.length === 0).length,
+      menorPreco: realPrices.length > 0 ? Math.min(...realPrices.map(p => p.preco)) : 0,
+      maiorPreco: realPrices.length > 0 ? Math.max(...realPrices.map(p => p.preco)) : 0,
+      menorTipo: realPrices.length > 0
         ? realPrices.reduce((a, b) => (a.preco < b.preco ? a : b)).tipo_combustivel
         : '',
-  }), [groupedStations, realPrices]);
+      avgEtanol,
+      avgGasolina,
+      ratio: Math.round(ratio),
+      etanolCompensa: ratio > 0 && ratio <= 70,
+      temRatio: ratio > 0,
+    };
+  }, [groupedStations, realPrices]);
 
   const mapCenter = useMemo((): [number, number] => {
     const first = groupedStations.find(g => g.station.latitude && g.station.longitude);
@@ -445,41 +457,64 @@ export default function Home() {
         ))}
       </div>
 
-      {/* ── Filtro Ticket Log ── */}
-      <div className="px-5 pb-2">
-        <button
-          className={`ticket-log-toggle ${ticketLogOnly ? 'active' : ''}`}
-          onClick={() => setTicketLogOnly(v => !v)}
-        >
-          <span>🎫</span>
-          <span>Somente Ticket Log</span>
-          {ticketLogOnly && <span className="ticket-log-badge">ATIVO</span>}
-        </button>
-      </div>
-
       {/* ── Stats ── */}
       {searched && groupedStations.length > 0 && activeTab !== 'ai' && (
-        <div className="stats-bar">
-          <div className="stat-card">
-            <div className="stat-value">{stats.totalPostos}</div>
-            <div className="stat-label">Postos</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-value text-green-400">{stats.comPreco}</div>
-            <div className="stat-label">Com Preço</div>
-          </div>
-          {stats.menorPreco > 0 ? (
+        <>
+          <div className="stats-bar">
             <div className="stat-card">
-              <div className="stat-value text-green-400">R${stats.menorPreco.toFixed(2)}</div>
-              <div className="stat-label">MENOR</div>
+              <div className="stat-value">{stats.totalPostos}</div>
+              <div className="stat-label">Postos</div>
             </div>
-          ) : (
             <div className="stat-card">
-              <div className="stat-value text-yellow-400">{stats.semPreco}</div>
-              <div className="stat-label">Sem Preço</div>
+              <div className="stat-value" style={{ color: '#10b981' }}>{stats.comPreco}</div>
+              <div className="stat-label">Com Preço</div>
+            </div>
+            {/* Ratio etanol/gasolina ou menor preço */}
+            <div className={`stat-card ${stats.temRatio ? (stats.etanolCompensa ? 'stat-card-green' : 'stat-card-blue') : ''}`}>
+              {stats.temRatio ? (
+                <>
+                  <div className="stat-value" style={{ color: stats.etanolCompensa ? '#10b981' : '#60a5fa', fontSize: '14px' }}>
+                    {stats.etanolCompensa ? '🌿' : '⛽'} {stats.ratio}%
+                  </div>
+                  <div className="stat-label">{stats.etanolCompensa ? 'Etanol' : 'Gasolina'}</div>
+                </>
+              ) : stats.menorPreco > 0 ? (
+                <>
+                  <div className="stat-value" style={{ color: '#10b981' }}>R${stats.menorPreco.toFixed(2)}</div>
+                  <div className="stat-label">Menor</div>
+                </>
+              ) : (
+                <>
+                  <div className="stat-value" style={{ color: '#f59e0b' }}>{stats.semPreco}</div>
+                  <div className="stat-label">Sem Preço</div>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Recomendação etanol vs gasolina */}
+          {stats.temRatio && (
+            <div className="ratio-banner">
+              <div className="ratio-banner-left">
+                <span className="ratio-icon">{stats.etanolCompensa ? '🌿' : '⛽'}</span>
+                <div>
+                  <div className="ratio-title">
+                    {stats.etanolCompensa ? 'Etanol compensa!' : 'Gasolina compensa mais'}
+                  </div>
+                  <div className="ratio-desc">
+                    Etanol = {stats.ratio}% da gasolina
+                    {stats.etanolCompensa
+                      ? ' — abaixo de 70%, etanol é mais econômico'
+                      : ' — acima de 70%, gasolina rende mais'}
+                  </div>
+                </div>
+              </div>
+              <div className={`ratio-badge ${stats.etanolCompensa ? 'green' : 'blue'}`}>
+                {stats.etanolCompensa ? '✓ Etanol' : '✓ Gasolina'}
+              </div>
             </div>
           )}
-        </div>
+        </>
       )}
 
       {/* ── Tabs Lista / Mapa ── */}

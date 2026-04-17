@@ -1128,3 +1128,61 @@ body {
   box-shadow: 0 8px 24px rgba(239, 68, 68, 0.4);
 }
 
+/* ===== RATIO BANNER (Etanol vs Gasolina) ===== */
+.ratio-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 16px 14px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: rgba(16, 185, 129, 0.07);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.ratio-banner-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ratio-icon { font-size: 22px; flex-shrink: 0; }
+
+.ratio-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1.2;
+}
+
+.ratio-desc {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  line-height: 1.4;
+}
+
+.ratio-badge {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.3px;
+}
+
+.ratio-badge.green {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.ratio-badge.blue {
+  background: rgba(59, 130, 246, 0.15);
+  color: var(--accent-blue-light);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+

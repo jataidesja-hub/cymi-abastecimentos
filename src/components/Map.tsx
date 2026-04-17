@@ -70,20 +70,55 @@ export default function GasMap({ stations, center, zoom }: MapProps) {
           className="map-tiles"
         />
         {stations.map((group, idx) => {
-          const isCheapest = idx === 0; // Assuming stations are sorted by price
-          const lowestPrice = Math.min(...group.prices.map(p => p.preco));
-          
+          const isCheapest = idx === 0 && group.prices.length > 0;
+
+          // Top 3 combustíveis de interesse
+          const TOP_FUELS = ['Gasolina Comum', 'Etanol', 'Diesel S10'];
+          const TOP_ICONS: Record<string, string> = {
+            'Gasolina Comum': '⛽',
+            'Etanol': '🌿',
+            'Diesel S10': '🛢️',
+          };
+          const topPrices = TOP_FUELS.map(tipo => ({
+            tipo,
+            icon: TOP_ICONS[tipo],
+            preco: group.prices.find(p => p.tipo === tipo)?.preco ?? null,
+          })).filter(p => p.preco !== null);
+
+          // Se nenhum dos top 3 disponível, mostra o mais barato disponível
+          const fallback = group.prices.length > 0
+            ? [group.prices.reduce((a, b) => a.preco < b.preco ? a : b)]
+            : [];
+          const displayPrices = topPrices.length > 0 ? topPrices : fallback;
+
           return (
-            <Marker 
-              key={group.station.id} 
+            <Marker
+              key={group.station.id}
               position={[group.station.latitude, group.station.longitude]}
               icon={createCustomIcon(isCheapest)}
             >
-              <Tooltip direction="top" offset={[0, -40]} opacity={1} permanent={false}>
-                <div style={{ fontWeight: 'bold' }}>{group.station.nome}</div>
-                <div style={{ color: 'var(--accent-green)', fontSize: '12px' }}>
-                  A partir de R$ ${lowestPrice.toFixed(3)}
+              <Tooltip direction="top" offset={[0, -44]} opacity={1} permanent={false}>
+                <div style={{ fontWeight: '700', fontSize: '13px', marginBottom: '6px', color: '#f1f5f9' }}>
+                  {group.station.nome}
                 </div>
+                {displayPrices.length > 0 ? (
+                  <table style={{ borderCollapse: 'collapse', width: '100%' }}>
+                    <tbody>
+                      {displayPrices.map((p: any) => (
+                        <tr key={p.tipo}>
+                          <td style={{ fontSize: '11px', paddingRight: '10px', color: '#94a3b8', paddingBottom: '2px' }}>
+                            {p.icon} {p.tipo.replace('Gasolina ', 'Gas. ')}
+                          </td>
+                          <td style={{ fontSize: '12px', fontWeight: '700', color: '#10b981', textAlign: 'right' }}>
+                            R$ {p.preco.toFixed(2)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <div style={{ fontSize: '11px', color: '#64748b' }}>Sem preço cadastrado</div>
+                )}
               </Tooltip>
             </Marker>
           );
