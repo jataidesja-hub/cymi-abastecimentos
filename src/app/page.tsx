@@ -7,6 +7,9 @@ function getCacheKey(cidade: string) { return `mapm-v1-${cidade.toLowerCase().tr
 function saveCache(cidade: string, data: FuelPriceItem[], source: string) {
   try { sessionStorage.setItem(getCacheKey(cidade), JSON.stringify({ data, source, ts: Date.now() })); } catch {}
 }
+function clearCache(cidade: string) {
+  try { sessionStorage.removeItem(getCacheKey(cidade)); } catch {}
+}
 function loadCache(cidade: string): { data: FuelPriceItem[]; source: string } | null {
   try {
     const raw = sessionStorage.getItem(getCacheKey(cidade));
@@ -302,6 +305,7 @@ export default function Home() {
   const handleSearch = () => {
     if (cidade.trim()) {
       allPricesRef.current = [];
+      clearCache(cidade.trim());
       fetchPrices(cidade, activeFuel);
     }
   };
@@ -333,7 +337,11 @@ export default function Home() {
             data.address?.town ||
             data.address?.municipality ||
             '';
-          if (city) setCidade(city);
+          if (city) {
+            setCidade(city);
+            clearCache(city.trim());
+          }
+          allPricesRef.current = [];
           fetchPrices(city, activeFuel, coords);
         } catch {
           fetchPrices('', activeFuel, coords);
@@ -461,8 +469,11 @@ export default function Home() {
   );
 
   const stats = useMemo(() => {
-    const etanolList = realPrices.filter(p => p.tipo_combustivel === 'Etanol').map(p => p.preco);
-    const gasolinaList = realPrices.filter(p => p.tipo_combustivel === 'Gasolina Comum').map(p => p.preco);
+    // Para o ratio etanol/gasolina usa TODOS os dados (não o filtrado)
+    // assim o banner aparece mesmo filtrando por um tipo específico
+    const allReal = allPricesRef.current.filter(p => p.preco > 0 && p.tipo_combustivel !== 'sem_preco');
+    const etanolList = allReal.filter(p => p.tipo_combustivel === 'Etanol').map(p => p.preco);
+    const gasolinaList = allReal.filter(p => p.tipo_combustivel === 'Gasolina Comum').map(p => p.preco);
     const avgEtanol = etanolList.length ? etanolList.reduce((a, b) => a + b, 0) / etanolList.length : 0;
     const avgGasolina = gasolinaList.length ? gasolinaList.reduce((a, b) => a + b, 0) / gasolinaList.length : 0;
     const ratio = avgEtanol > 0 && avgGasolina > 0 ? (avgEtanol / avgGasolina) * 100 : 0;
@@ -473,9 +484,6 @@ export default function Home() {
       semPreco: groupedStations.filter(g => g.prices.length === 0).length,
       menorPreco: realPrices.length > 0 ? Math.min(...realPrices.map(p => p.preco)) : 0,
       maiorPreco: realPrices.length > 0 ? Math.max(...realPrices.map(p => p.preco)) : 0,
-      menorTipo: realPrices.length > 0
-        ? realPrices.reduce((a, b) => (a.preco < b.preco ? a : b)).tipo_combustivel
-        : '',
       avgEtanol,
       avgGasolina,
       ratio: Math.round(ratio),
