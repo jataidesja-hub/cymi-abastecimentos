@@ -119,27 +119,27 @@ export async function GET(request: NextRequest) {
 
 Pesquise na internet: "postos de combustível ${cityInfo.name} preços gasolina etanol diesel"
 
-Também pesquise: "postos ${cityInfo.name} gaspedia OR waze OR posto combustivel"
+Também pesquise: "postos ${cityInfo.name} gaspedia OR waze OR cnpj posto"
 
 Com base nos resultados, monte uma lista dos postos de combustível encontrados ESPECIFICAMENTE em ${cityInfo.name}, Brasil.
-Se for uma cidade pequena e não achar nomes específicos, forneça postos genéricos com nomes baseados nas bandeiras (ex: "Posto Petrobras") e use endereços como "Centro" ou rodovias locais, mas NUNCA deixe a lista vazia. Toda cidade tem postos.
+REGRA ABSOLUTA: NÃO INVENTE nomes ou endereços. Liste APENAS postos REAIS que você confirmar a existência na cidade através da sua busca na web. É preferível retornar menos postos do que postos inventados. Se não encontrar nenhum posto real, retorne uma lista vazia "postos": [].
 
-Para cada posto, extraia ou estime:
-- nome do posto
-- endereço (rua, número, bairro - DENTRO da cidade ${cityInfo.name})
+Para cada posto real encontrado, forneça:
+- nome do posto (Nome real)
+- endereço (Endereço real DENTRO da cidade ${cityInfo.name})
 - bandeira (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
 - preços em reais para: gasolina comum, gasolina aditivada, etanol, diesel s10, diesel s500, gnv
 
-Se não encontrar preços específicos do posto, use a média atual da cidade/região.
+Se encontrar o posto mas não encontrar os preços específicos dele, use a média atual da cidade/região para preencher os valores.
 
 Responda SOMENTE com JSON válido, sem texto antes ou depois:
 {
   "cidade": "${cityInfo.name}",
-  "fonte": "nome do site ou fonte usada",
+  "fonte": "nome do site ou fonte usada para achar os postos reais",
   "postos": [
     {
-      "nome": "Posto Shell Centro",
-      "endereco": "Av. Getúlio Vargas, 123, Centro",
+      "nome": "Posto X (Real)",
+      "endereco": "Av. Y, 123, Bairro, Cidade",
       "bandeira": "Shell",
       "precos": {
         "gasolina_comum": 6.29,
@@ -153,7 +153,7 @@ Responda SOMENTE com JSON válido, sem texto antes ou depois:
   ]
 }
 
-Inclua pelo menos 4 postos. Use null para preços não encontrados.`,
+Lembre-se: Nomes e endereços devem ser os REAIS encontrados na internet. Use null para preços não encontrados.`,
         },
       ],
     });
