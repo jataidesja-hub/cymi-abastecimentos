@@ -98,12 +98,6 @@ interface DeduraStation {
   precos: Record<string, number>; // tipo → preço real
 }
 
-function parsePrice(text: string): number | null {
-  const m = text.match(/R\$\s*([\d]+[,.][\d]{2,3})/);
-  if (!m) return null;
-  const v = parseFloat(m[1].replace(',','.'));
-  return v > 1 && v < 20 ? v : null;
-}
 
 function parseDeduraHtml(html: string): { stations: DeduraStation[]; bestPrices: Record<string, { preco: number; posto: string }> } {
   const stations: DeduraStation[] = [];
@@ -140,11 +134,14 @@ function parseDeduraHtml(html: string): { stations: DeduraStation[]; bestPrices:
   for (let i = 1; i < blocks.length; i++) {
     const block = blocks[i];
 
-    // Nome
-    const nomeM = block.match(/^[^>]*?>?([^<]{3,80})</);
+    // Nome — bloco começa com: class="...">NOME DO POSTO</h3>
+    const nomeM = block.match(/^[^>]*>([^<]{2,100})<\/h3>/i);
     if (!nomeM) continue;
-    const nome = nomeM[1].trim().replace(/\s+/g,' ');
-    if (nome.length < 3 || /melhores|preços|postos|busca|filtro/i.test(nome)) continue;
+    const nome = nomeM[1].trim()
+      .replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
+      .replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n))
+      .replace(/\s+/g,' ');
+    if (nome.length < 2 || /melhores|preços|postos|busca|filtro/i.test(nome)) continue;
 
     // Endereço — padrão logradouro brasileiro
     const endM = block.match(/(?:Rua|Avenida|Av\b|Rod(?:ovia)?\.?|Alameda|Travessa|Praça|Estrada|BR-?\d{2,3}|Rodovia|Largo)[^<]{5,150}/i);
@@ -160,14 +157,8 @@ function parseDeduraHtml(html: string): { stations: DeduraStation[]; bestPrices:
     // Preços reais que aparecem no card
     const precos: Record<string, number> = {};
 
-    // Gasolina Comum (sempre o primeiro preço)
-    const firstPrice = parsePrice(block);
-    if (firstPrice) precos['Gasolina Comum'] = firstPrice;
-
-    // Outros combustíveis que aparecem no card
     for (const [label, tipo] of Object.entries(fuelLabels)) {
-      if (tipo === 'Gasolina Comum') continue;
-      const re = new RegExp(`${label}[^R]{0,20}R\\$\\s*([\\d,\\.]+)`, 'i');
+      const re = new RegExp(`${label}[^R<]{0,30}R\\$\\s*([\\d,\\.]+)`, 'i');
       const m = block.match(re);
       if (m) {
         const v = parseFloat(m[1].replace(',','.'));
