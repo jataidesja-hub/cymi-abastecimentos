@@ -170,11 +170,18 @@ export default function Home() {
   };
 
   const openNavigation = (station: Station) => {
-    const { latitude, longitude, nome, endereco } = station;
+    const { latitude, longitude, nome, endereco, cidade } = station;
     if (!latitude || !longitude) return;
-    const label = encodeURIComponent(`${nome} — ${endereco}`);
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&destination_place_id=${label}&travelmode=driving`;
-    window.open(url, '_blank');
+    // Usa busca por nome + endereço como destino — mais confiável que coordenadas puras
+    const searchQuery = encodeURIComponent(`${nome}, ${endereco}, ${cidade}`);
+    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&query_place_id=${searchQuery}`;
+    // Fallback: se coordenada é genérica, busca pelo nome
+    const isGenericCoord = !latitude || !longitude || (Math.abs(latitude) < 0.01 && Math.abs(longitude) < 0.01);
+    if (isGenericCoord) {
+      window.open(`https://www.google.com/maps/search/?api=1&query=${searchQuery}`, '_blank');
+    } else {
+      window.open(`https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`, '_blank');
+    }
   };
 
   const applyFilter = (all: FuelPriceItem[], tipo: string) => {
