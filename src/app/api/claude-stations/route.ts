@@ -5,70 +5,72 @@ export const maxDuration = 60;
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ─── Geocode endereço → lat/lon via Nominatim COM validação de proximidade ────
-async function geocodeAddress(
-  address: string,
-  cidade: string,
-  cityCenter: { lat: number; lon: number },
-  maxDistKm: number = 30
-): Promise<{ lat: number; lon: number } | null> {
+// ─── Overpass: busca postos reais do OpenStreetMap ───────────────────────────
+const OVERPASS_MIRRORS = [
+  'https://overpass-api.de/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
+  'https://maps.mail.ru/osm/tools/overpass/api/interpreter',
+];
+
+async function queryOverpass(query: string): Promise<any[] | null> {
+  const attempts = OVERPASS_MIRRORS.map(mirror =>
+    fetch(mirror, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: `data=${encodeURIComponent(query)}`,
+      signal: AbortSignal.timeout(8000),
+    })
+      .then(r => (r.ok ? r.json() : Promise.reject('not ok')))
+      .then(d => {
+        if (!Array.isArray(d.elements)) throw new Error('no elements');
+        return d.elements as any[];
+      })
+  );
+
   try {
-    const q = encodeURIComponent(`${address}, ${cidade}, Brasil`);
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=br`,
-      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (!data || data.length === 0) return null;
-
-    // Pega o resultado mais próximo do centro da cidade
-    let best: { lat: number; lon: number } | null = null;
-    let bestDist = Infinity;
-
-    for (const item of data) {
-      const lat = parseFloat(item.lat);
-      const lon = parseFloat(item.lon);
-      const dist = haversineKm(cityCenter.lat, cityCenter.lon, lat, lon);
-      if (dist < bestDist && dist < maxDistKm) {
-        bestDist = dist;
-        best = { lat, lon };
-      }
-    }
-
-    return best;
+    return await Promise.any(attempts);
   } catch {
     return null;
   }
 }
 
-// ─── Distância em km entre dois pontos (Haversine) ───────────────────────────
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+// ─── Nominatim: busca postos diretamente (fallback) ──────────────────────────
+async function getStationsByNominatim(cidade: string): Promise<any[] | null> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?amenity=fuel&city=${encodeURIComponent(cidade)}&country=Brasil&format=json&limit=40&addressdetails=1`,
+      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(5000) }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    return data.map((item: any) => ({
+      id: item.osm_id || `nom-${Math.random()}`,
+      lat: parseFloat(item.lat),
+      lon: parseFloat(item.lon),
+      tags: {
+        name: item.display_name?.split(',')[0]?.trim() || '',
+        'addr:street': item.address?.road || '',
+        'addr:housenumber': item.address?.house_number || '',
+        'addr:suburb': item.address?.suburb || item.address?.neighbourhood || '',
+        brand: '',
+      },
+    }));
+  } catch {
+    return null;
+  }
 }
 
-// ─── Resolve nome da cidade via Nominatim + retorna coordenadas ──────────────
+// ─── Resolve cidade → coordenadas + bbox ─────────────────────────────────────
 async function resolveCity(input: string): Promise<{
-  name: string;
-  state: string;
-  fullName: string;
-  lat: number;
-  lon: number;
+  name: string; state: string; fullName: string;
+  lat: number; lon: number; bbox: number[] | null;
 }> {
-  // Remove UF suffix (e.g., "BA", "PE", "- BA", ", BA")
   const ufPattern = /[\s,\-]+(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/i;
   const cleanInput = input.replace(ufPattern, '').trim() || input;
 
-  // Tenta buscar com input original e depois com input limpo
   const queries = [input, cleanInput];
-  if (input !== cleanInput) queries.push(cleanInput);
-
   for (const q of queries) {
     try {
       const res = await fetch(
@@ -82,16 +84,68 @@ async function resolveCity(input: string): Promise<{
         const state = data[0].address?.state || '';
         const lat = parseFloat(data[0].lat);
         const lon = parseFloat(data[0].lon);
-        return { name: city, state, fullName: state ? `${city}, ${state}` : city, lat, lon };
+        const bbox = data[0].boundingbox ? data[0].boundingbox.map(Number) : null;
+        return { name: city, state, fullName: state ? `${city}, ${state}` : city, lat, lon, bbox };
       }
     } catch {}
   }
-
-  // Fallback: sem geocoding — coordenadas genéricas do Brasil
-  return { name: cleanInput, state: '', fullName: cleanInput, lat: -14.24, lon: -51.93 };
+  return { name: cleanInput, state: '', fullName: cleanInput, lat: -14.24, lon: -51.93, bbox: null };
 }
 
-// ─── Handler ─────────────────────────────────────────────────────────────────
+// ─── Busca postos OSM reais ──────────────────────────────────────────────────
+async function findRealStations(cidade: string, bbox: number[] | null, lat: number, lon: number): Promise<any[]> {
+  // Estratégia 1: Overpass com bbox
+  if (bbox) {
+    const [south, north, west, east] = bbox;
+    const query = `[out:json][timeout:8];(node["amenity"="fuel"](${south},${west},${north},${east});way["amenity"="fuel"](${south},${west},${north},${east}););out 60 center;`;
+    const result = await queryOverpass(query);
+    if (result && result.length > 0) return result;
+  }
+
+  // Estratégia 2: Overpass com raio de 15km
+  const query2 = `[out:json][timeout:8];(node["amenity"="fuel"](around:15000,${lat},${lon});way["amenity"="fuel"](around:15000,${lat},${lon}););out 60 center;`;
+  const result2 = await queryOverpass(query2);
+  if (result2 && result2.length > 0) return result2;
+
+  // Estratégia 3: Nominatim direto
+  const nomResult = await getStationsByNominatim(cidade);
+  if (nomResult && nomResult.length > 0) return nomResult;
+
+  return [];
+}
+
+// ─── Helpers de formatação ───────────────────────────────────────────────────
+function normalizeBrand(brand: string): string {
+  if (!brand) return 'Branco';
+  const b = brand.toLowerCase().trim();
+  if (b.includes('shell') || b.includes('raizen') || b.includes('raízen')) return 'Shell';
+  if (b.includes('ipiranga') || b.includes('vibra')) return 'Ipiranga';
+  if (b === 'petrobras' || b === 'br' || b.includes('petrobras')) return 'Petrobras';
+  if (b === 'ale' || b.startsWith('ale ') || b.includes(' ale')) return 'Ale';
+  return brand;
+}
+
+function buildName(tags: Record<string, string>): string {
+  const name = tags.name || tags['name:pt'] || tags['official_name'];
+  const brandRaw = tags.brand || tags['brand:pt'] || '';
+  const brandNorm = normalizeBrand(brandRaw);
+  if (name && name.length > 2 && name.toLowerCase() !== brandRaw.toLowerCase()) return name;
+  if (brandNorm && brandNorm !== 'Branco') return `Posto ${brandNorm}`;
+  if (name && name.length > 0) return name;
+  return 'Posto de Combustível';
+}
+
+function buildAddress(tags: Record<string, string>, cidadeFallback: string): string {
+  const street = tags['addr:street'];
+  const number = tags['addr:housenumber'];
+  const neighborhood = tags['addr:suburb'] || tags['addr:neighbourhood'] || tags['addr:district'];
+  if (street) return [street, number, neighborhood].filter(Boolean).join(', ');
+  if (tags['addr:full']) return tags['addr:full'];
+  if (neighborhood) return `${neighborhood}, ${cidadeFallback}`;
+  return cidadeFallback;
+}
+
+// ─── Handler principal ──────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const cidadeRaw = (searchParams.get('cidade') || '').trim();
@@ -106,70 +160,86 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY não configurada' }, { status: 503 });
   }
 
-  // Resolve o nome correto da cidade via Nominatim + coordenadas
+  // 1. Resolve a cidade + coordenadas reais
   const resolved = cidadeRaw ? await resolveCity(cidadeRaw) : null;
   const cidade = resolved?.name || cidadeRaw;
   const cidadeCompleta = resolved?.fullName || cidadeRaw;
-  const buscaLocal = cidade || `coordenadas ${latParam},${lonParam}`;
+  const cityLat = resolved?.lat || (latParam ? parseFloat(latParam) : -14.24);
+  const cityLon = resolved?.lon || (lonParam ? parseFloat(lonParam) : -51.93);
 
-  // Centro da cidade — vindo direto do resolveCity (sem chamada extra)
-  const cityCenter = resolved
-    ? { lat: resolved.lat, lon: resolved.lon }
-    : (latParam && lonParam)
-      ? { lat: parseFloat(latParam), lon: parseFloat(lonParam) }
-      : { lat: -14.24, lon: -51.93 };
+  console.log(`[claude-stations] "${cidadeRaw}" → "${cidadeCompleta}" (${cityLat}, ${cityLon})`);
 
-  console.log(`[claude-stations] Input: "${cidadeRaw}" → Resolved: "${cidadeCompleta}" (${cityCenter.lat}, ${cityCenter.lon})`);
+  // 2. Busca postos REAIS do OpenStreetMap em PARALELO com Claude AI preços
+  const [osmStations, claudePrices] = await Promise.allSettled([
+    findRealStations(cidade, resolved?.bbox || null, cityLat, cityLon),
+    getClaudePrices(cidade, cidadeCompleta, resolved?.state || ''),
+  ]);
 
+  const realStations = osmStations.status === 'fulfilled' ? osmStations.value : [];
+  const priceData = claudePrices.status === 'fulfilled' ? claudePrices.value : null;
+
+  console.log(`[claude-stations] OSM: ${realStations.length} postos | Claude: ${priceData ? priceData.postos.length + ' preços' : 'falhou'}`);
+
+  // 3. Se encontrou postos reais, enriquece com preços do Claude
+  if (realStations.length > 0) {
+    const result = buildResult(realStations, priceData, cidade, cidadeCompleta, resolved?.state || '');
+    return NextResponse.json({
+      data: result,
+      source: priceData
+        ? `OpenStreetMap + Claude AI — ${priceData.fonte || 'busca web'}`
+        : 'OpenStreetMap (sem preços)',
+      total_osm: realStations.length,
+      osm_unavailable: false,
+      cidade: cidadeCompleta,
+    });
+  }
+
+  // 4. Sem postos OSM — usa dados puros do Claude (com aviso de localização aproximada)
+  if (priceData && priceData.postos.length > 0) {
+    const result = buildClaudeOnlyResult(priceData, cidade, cidadeCompleta, resolved?.state || '', cityLat, cityLon);
+    return NextResponse.json({
+      data: result,
+      source: `Claude AI — ${priceData.fonte || 'busca web'} (localização aproximada)`,
+      total_osm: 0,
+      osm_unavailable: true,
+      cidade: cidadeCompleta,
+    });
+  }
+
+  return NextResponse.json({ error: 'Nenhum posto encontrado', cidade: cidadeCompleta }, { status: 404 });
+}
+
+// ─── Claude AI: busca APENAS preços da região ───────────────────────────────
+async function getClaudePrices(cidade: string, cidadeCompleta: string, state: string): Promise<{
+  postos: { nome: string; bandeira: string; precos: Record<string, number | null> }[];
+  fonte: string;
+} | null> {
   try {
-    // ── Claude com web_search busca postos e preços ───────────────────────────
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 5000,
+      max_tokens: 4000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [
         {
           role: 'user',
-          content: `Você é um especialista em postos de combustível no Brasil. Preciso de informações sobre postos em "${cidadeCompleta}", Brasil.
+          content: `Pesquise preços de combustível em ${cidadeCompleta}, Brasil.
 
-INSTRUÇÕES IMPORTANTES:
-1. Faça múltiplas buscas na web com termos variados:
-   - "postos de combustível ${cidadeCompleta} preço gasolina"
-   - "combustível ${cidade} ${resolved?.state || ''} preço"
-   - "posto gasolina ${cidade} gaspedia"
-   - "preço combustível ${cidade} ${new Date().getFullYear()}"
+Busque:
+- "preço combustível ${cidadeCompleta} ${new Date().getFullYear()}"
+- "gasolina etanol diesel ${cidade} ${state}"
+- "${cidade} gaspedia combustível preço"
+- "ANP preço ${state || 'Brasil'} combustível"
 
-2. ${cidade} é uma cidade real no Brasil${resolved?.state ? ` no estado de ${resolved.state}` : ''}. Mesmo se for pequena, EXISTEM postos lá.
+Encontre preços reais para postos de combustível em ${cidade}.
+Se não encontrar preços específicos de ${cidade}, use preços da cidade mais próxima ou média ANP do estado.
 
-3. MUITO IMPORTANTE sobre localização:
-   - Liste SOMENTE postos que ficam DENTRO de ${cidade}
-   - NÃO inclua postos de cidades vizinhas (exemplo: se buscou ${cidade}, não liste postos de outras cidades próximas)
-   - Cada posto DEVE ter endereço real dentro de ${cidade}
-
-4. Se não encontrar postos específicos com nome na internet para esta cidade:
-   - Busque preços ANP da região/estado para referência de preço
-   - Liste os postos que provavelmente existem (toda cidade brasileira tem pelo menos 1 posto)
-   - Use endereços como "Centro, ${cidade}" ou "BR-XXX, ${cidade}"
-
-5. Para cada posto, forneça:
-   - nome (real se encontrar, senão "Posto [bandeira] ${cidade}")
-   - endereco (endereço DENTRO de ${cidade}, NUNCA de outra cidade)
-   - bandeira (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
-   - precos em reais para cada combustível
-
-6. Se não encontrar preços exatos, use a média ANP da região/estado.
-
-7. NUNCA retorne uma lista vazia. Mínimo 3 postos.
-
-Responda SOMENTE com JSON válido, sem texto antes ou depois:
+Responda SOMENTE com JSON válido:
 {
-  "cidade": "${cidadeCompleta}",
-  "fonte": "fonte usada",
+  "fonte": "site ou fonte usada",
   "postos": [
     {
       "nome": "Nome do Posto",
-      "endereco": "Rua X, 123, Bairro, ${cidade}",
-      "bandeira": "Bandeira",
+      "bandeira": "Shell",
       "precos": {
         "gasolina_comum": 6.29,
         "gasolina_aditivada": 6.69,
@@ -180,175 +250,232 @@ Responda SOMENTE com JSON válido, sem texto antes ou depois:
       }
     }
   ]
-}`,
+}
+
+Liste pelo menos 3 postos com preços. Use null para preços não encontrados.`,
         },
       ],
     });
 
-    // ── Extrai o JSON da resposta do Claude ───────────────────────────────────
     let jsonText = '';
     for (const block of response.content) {
-      if (block.type === 'text') {
-        jsonText += block.text;
-      }
+      if (block.type === 'text') jsonText += block.text;
     }
 
     const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('[claude-stations] Claude não retornou JSON. Response:', jsonText.slice(0, 500));
-      return NextResponse.json({ error: 'Claude não retornou dados estruturados', raw: jsonText.slice(0, 200) }, { status: 502 });
-    }
+    if (!jsonMatch) return null;
 
-    let claudeData: any;
+    let parsed: any;
     try {
-      claudeData = JSON.parse(jsonMatch[0]);
+      parsed = JSON.parse(jsonMatch[0]);
     } catch {
-      const cleaned = jsonMatch[0]
-        .replace(/,\s*}/g, '}')
-        .replace(/,\s*]/g, ']')
-        .replace(/[\x00-\x1F\x7F]/g, '');
-      claudeData = JSON.parse(cleaned);
+      const cleaned = jsonMatch[0].replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
+      parsed = JSON.parse(cleaned);
     }
 
-    const postos: any[] = claudeData.postos || [];
+    return {
+      postos: parsed.postos || [],
+      fonte: parsed.fonte || 'Claude AI',
+    };
+  } catch (err: any) {
+    console.error('[claude-prices]', err.message);
+    return null;
+  }
+}
 
-    if (postos.length === 0) {
-      console.warn('[claude-stations] 0 postos para:', cidadeCompleta);
-      return NextResponse.json({ error: 'Nenhum posto encontrado', cidade: cidadeCompleta }, { status: 404 });
+// ─── Monta resultado: postos OSM reais + preços Claude ──────────────────────
+function buildResult(
+  osmStations: any[],
+  priceData: { postos: any[]; fonte: string } | null,
+  cidade: string,
+  cidadeCompleta: string,
+  state: string
+): any[] {
+  const FUEL_MAP: Record<string, string> = {
+    gasolina_comum: 'Gasolina Comum',
+    gasolina_aditivada: 'Gasolina Aditivada',
+    etanol: 'Etanol',
+    diesel_s10: 'Diesel S10',
+    diesel_s500: 'Diesel S500',
+    gnv: 'GNV',
+  };
+
+  // Calcula preço médio do Claude para aplicar nos postos OSM
+  const avgPrices: Record<string, number> = {};
+  if (priceData) {
+    const sums: Record<string, { total: number; count: number }> = {};
+    for (const posto of priceData.postos) {
+      for (const [key, val] of Object.entries(posto.precos || {})) {
+        if (typeof val === 'number' && val > 0 && val < 20) {
+          if (!sums[key]) sums[key] = { total: 0, count: 0 };
+          sums[key].total += val;
+          sums[key].count += 1;
+        }
+      }
     }
+    for (const [key, s] of Object.entries(sums)) {
+      avgPrices[key] = Math.round((s.total / s.count) * 100) / 100;
+    }
+  }
 
-    console.log(`[claude-stations] ${postos.length} postos para "${cidadeCompleta}"`);
+  // Tenta fazer match nome-a-nome entre Claude e OSM
+  const claudeByName = new Map<string, Record<string, number | null>>();
+  if (priceData) {
+    for (const p of priceData.postos) {
+      if (p.nome) claudeByName.set(p.nome.toLowerCase().trim(), p.precos || {});
+    }
+  }
 
-    // ── Geocoda endereços em paralelo com validação de proximidade ────────────
-    // Rate limit Nominatim: máximo 1 req/s, então fazemos em lotes de 3
-    const BATCH_SIZE = 3;
-    const allEntries: any[] = [];
+  const result: any[] = [];
 
-    for (let i = 0; i < postos.length && i < 20; i += BATCH_SIZE) {
-      const batch = postos.slice(i, i + BATCH_SIZE);
+  for (let i = 0; i < osmStations.length; i++) {
+    const el = osmStations[i];
+    const lat = el.lat ?? el.center?.lat;
+    const lon = el.lon ?? el.center?.lon;
+    if (!lat || !lon) continue;
 
-      const batchResults = await Promise.all(
-        batch.map(async (posto: any, batchIdx: number) => {
-          const idx = i + batchIdx;
-          let coords: { lat: number; lon: number } | null = null;
+    const tags = el.tags || {};
+    const nome = buildName(tags);
+    const bandeira = normalizeBrand(tags.brand || tags['brand:pt'] || '');
+    const endereco = buildAddress(tags, cidade);
 
-          // Estratégia 1: geocodar endereço completo + cidade
-          if (posto.endereco && posto.endereco.length > 5) {
-            coords = await geocodeAddress(posto.endereco, cidade, cityCenter);
-          }
+    const stationId = `osm-${el.id || i}`;
+    const stationInfo = {
+      id: stationId,
+      osm_id: el.id,
+      nome,
+      bandeira,
+      endereco,
+      cidade: cidadeCompleta,
+      estado: state,
+      latitude: lat,
+      longitude: lon,
+      ticket_log: tags['payment:ticketlog'] === 'yes',
+    };
 
-          // Estratégia 2: geocodar só nome da rua + cidade
-          if (!coords && posto.endereco) {
-            const parts = posto.endereco.split(',');
-            const street = parts[0]?.trim();
-            if (street && street.length > 3) {
-              coords = await geocodeAddress(street, cidade, cityCenter);
-            }
-          }
-
-          // Estratégia 3: geocodar nome do posto + cidade
-          if (!coords && posto.nome) {
-            coords = await geocodeAddress(posto.nome, cidade, cityCenter);
-          }
-
-          // Fallback: centro da cidade com jitter para não sobrepor
-          if (!coords) {
-            const jitterLat = (Math.random() - 0.5) * 0.004;
-            const jitterLon = (Math.random() - 0.5) * 0.004;
-            coords = {
-              lat: cityCenter.lat + jitterLat,
-              lon: cityCenter.lon + jitterLon,
-            };
-          }
-
-          // Validação final: se ficou a mais de 50km do centro, reposiciona
-          const dist = haversineKm(cityCenter.lat, cityCenter.lon, coords.lat, coords.lon);
-          if (dist > 50) {
-            console.warn(`[claude-stations] Posto "${posto.nome}" ficou ${dist.toFixed(0)}km do centro, reposicionando`);
-            const jitterLat = (Math.random() - 0.5) * 0.006;
-            const jitterLon = (Math.random() - 0.5) * 0.006;
-            coords = {
-              lat: cityCenter.lat + jitterLat,
-              lon: cityCenter.lon + jitterLon,
-            };
-          }
-
-          const precos = posto.precos || {};
-          const FUEL_MAP: Record<string, string> = {
-            gasolina_comum: 'Gasolina Comum',
-            gasolina_aditivada: 'Gasolina Aditivada',
-            etanol: 'Etanol',
-            diesel_s10: 'Diesel S10',
-            diesel_s500: 'Diesel S500',
-            gnv: 'GNV',
-          };
-
-          const stationId = `claude-${idx}-${Date.now()}`;
-          const stationInfo = {
-            id: stationId,
-            osm_id: null,
-            nome: posto.nome || `Posto de Combustível ${cidade}`,
-            bandeira: posto.bandeira || 'Branco',
-            endereco: posto.endereco || `Centro, ${cidade}`,
-            cidade: cidade || buscaLocal,
-            estado: resolved?.state || '',
-            latitude: coords.lat,
-            longitude: coords.lon,
-            ticket_log: false,
-          };
-
-          const entries: any[] = [];
-          let temPreco = false;
-
-          for (const [key, tipo] of Object.entries(FUEL_MAP)) {
-            const preco = precos[key];
-            if (preco && typeof preco === 'number' && preco > 0 && preco < 20) {
-              temPreco = true;
-              entries.push({
-                id: `${stationId}-${key}`,
-                tipo_combustivel: tipo,
-                preco,
-                data_atualizacao: new Date().toISOString(),
-                reportado_por: 'Claude AI',
-                ticket_log: 'Não',
-                stations: stationInfo,
-              });
-            }
-          }
-
-          if (!temPreco) {
-            entries.push({
-              id: `sem-preco-${stationId}`,
-              tipo_combustivel: 'sem_preco',
-              preco: 0,
-              data_atualizacao: new Date().toISOString(),
-              reportado_por: 'Claude AI',
-              ticket_log: 'Não',
-              stations: stationInfo,
-            });
-          }
-
-          return entries;
-        })
-      );
-
-      allEntries.push(...batchResults.flat());
-
-      // Pausa entre lotes para respeitar rate limit do Nominatim
-      if (i + BATCH_SIZE < postos.length) {
-        await new Promise(r => setTimeout(r, 300));
+    // Tenta match por nome com dados do Claude
+    let matchedPrices: Record<string, number | null> | null = null;
+    const nomeLower = nome.toLowerCase();
+    for (const [cName, cPrices] of claudeByName) {
+      if (nomeLower.includes(cName) || cName.includes(nomeLower) ||
+          (bandeira && cName.includes(bandeira.toLowerCase()))) {
+        matchedPrices = cPrices;
+        break;
       }
     }
 
-    return NextResponse.json({
-      data: allEntries,
-      source: `Claude AI — ${claudeData.fonte || 'busca web'}`,
-      total_osm: postos.length,
-      osm_unavailable: false,
-      cidade: cidadeCompleta,
-    });
-  } catch (err: any) {
-    console.error('[claude-stations] Error:', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    // Usa preços do match, senão usa média
+    const pricesToUse = matchedPrices || (Object.keys(avgPrices).length > 0 ? avgPrices : null);
+    let temPreco = false;
+
+    if (pricesToUse) {
+      for (const [key, tipo] of Object.entries(FUEL_MAP)) {
+        const preco = pricesToUse[key];
+        if (preco && typeof preco === 'number' && preco > 0 && preco < 20) {
+          temPreco = true;
+          result.push({
+            id: `${stationId}-${key}`,
+            tipo_combustivel: tipo,
+            preco,
+            data_atualizacao: new Date().toISOString(),
+            reportado_por: matchedPrices ? 'Claude AI' : 'pesquisa web',
+            ticket_log: stationInfo.ticket_log ? 'Sim' : 'Não',
+            stations: stationInfo,
+          });
+        }
+      }
+    }
+
+    if (!temPreco) {
+      result.push({
+        id: `sem-preco-${stationId}`,
+        tipo_combustivel: 'sem_preco',
+        preco: 0,
+        data_atualizacao: new Date().toISOString(),
+        reportado_por: 'OpenStreetMap',
+        ticket_log: stationInfo.ticket_log ? 'Sim' : 'Não',
+        stations: stationInfo,
+      });
+    }
   }
+
+  return result;
+}
+
+// ─── Resultado só com dados do Claude (sem OSM — localização aproximada) ─────
+function buildClaudeOnlyResult(
+  priceData: { postos: any[]; fonte: string },
+  cidade: string,
+  cidadeCompleta: string,
+  state: string,
+  centerLat: number,
+  centerLon: number
+): any[] {
+  const FUEL_MAP: Record<string, string> = {
+    gasolina_comum: 'Gasolina Comum',
+    gasolina_aditivada: 'Gasolina Aditivada',
+    etanol: 'Etanol',
+    diesel_s10: 'Diesel S10',
+    diesel_s500: 'Diesel S500',
+    gnv: 'GNV',
+  };
+
+  const result: any[] = [];
+
+  for (let i = 0; i < priceData.postos.length && i < 15; i++) {
+    const posto = priceData.postos[i];
+
+    // Distribui postos ao redor do centro da cidade
+    const angle = (2 * Math.PI * i) / priceData.postos.length;
+    const radius = 0.003 + Math.random() * 0.003; // ~300-600m do centro
+    const lat = centerLat + radius * Math.cos(angle);
+    const lon = centerLon + radius * Math.sin(angle);
+
+    const stationId = `claude-${i}-${Date.now()}`;
+    const stationInfo = {
+      id: stationId,
+      osm_id: null,
+      nome: posto.nome || `Posto de Combustível ${cidade}`,
+      bandeira: posto.bandeira || 'Branco',
+      endereco: `${cidade} (localização aproximada)`,
+      cidade: cidadeCompleta,
+      estado: state,
+      latitude: lat,
+      longitude: lon,
+      ticket_log: false,
+    };
+
+    const precos = posto.precos || {};
+    let temPreco = false;
+
+    for (const [key, tipo] of Object.entries(FUEL_MAP)) {
+      const preco = precos[key];
+      if (preco && typeof preco === 'number' && preco > 0 && preco < 20) {
+        temPreco = true;
+        result.push({
+          id: `${stationId}-${key}`,
+          tipo_combustivel: tipo,
+          preco,
+          data_atualizacao: new Date().toISOString(),
+          reportado_por: 'Claude AI',
+          ticket_log: 'Não',
+          stations: stationInfo,
+        });
+      }
+    }
+
+    if (!temPreco) {
+      result.push({
+        id: `sem-preco-${stationId}`,
+        tipo_combustivel: 'sem_preco',
+        preco: 0,
+        data_atualizacao: new Date().toISOString(),
+        reportado_por: 'Claude AI',
+        ticket_log: 'Não',
+        stations: stationInfo,
+      });
+    }
+  }
+
+  return result;
 }

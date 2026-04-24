@@ -171,16 +171,14 @@ export default function Home() {
 
   const openNavigation = (station: Station) => {
     const { latitude, longitude, nome, endereco, cidade } = station;
-    if (!latitude || !longitude) return;
-    // Usa busca por nome + endereço como destino — mais confiável que coordenadas puras
-    const searchQuery = encodeURIComponent(`${nome}, ${endereco}, ${cidade}`);
-    const url = `https://www.google.com/maps/search/?api=1&query=${latitude},${longitude}&query_place_id=${searchQuery}`;
-    // Fallback: se coordenada é genérica, busca pelo nome
-    const isGenericCoord = !latitude || !longitude || (Math.abs(latitude) < 0.01 && Math.abs(longitude) < 0.01);
-    if (isGenericCoord) {
-      window.open(`https://www.google.com/maps/search/?api=1&query=${searchQuery}`, '_blank');
-    } else {
+    // Se é posto real do OSM (tem coordenadas verificadas), navega por coordenada
+    const isRealLocation = station.id.startsWith('osm-') && latitude && longitude;
+    if (isRealLocation) {
       window.open(`https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`, '_blank');
+    } else {
+      // Posto sem localização exata — busca pelo nome no Google Maps
+      const query = encodeURIComponent(`${nome} posto combustível ${endereco} ${cidade}`);
+      window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
     }
   };
 
