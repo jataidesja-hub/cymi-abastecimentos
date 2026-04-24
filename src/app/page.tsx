@@ -95,6 +95,9 @@ export default function Home() {
   const [ticketLogOnly, setTicketLogOnly] = useState(false); // eslint-disable-line
   const [prices, setPrices] = useState<FuelPriceItem[]>([]);
   const allPricesRef = useRef<FuelPriceItem[]>([]);
+  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const autocompleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -119,6 +122,59 @@ export default function Home() {
     setToast(msg);
     setToastType(type);
     setTimeout(() => setToast(''), 3500);
+  };
+
+  const fetchCitySuggestions = useCallback(async (query: string) => {
+    if (query.length < 2) { setCitySuggestions([]); setShowSuggestions(false); return; }
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', Brasil')}&format=json&limit=6&addressdetails=1&featuretype=city`,
+        { headers: { 'User-Agent': 'MAPM-App/1.0' } }
+      );
+      const data = await res.json();
+      const names: string[] = [];
+      const seen = new Set<string>();
+      for (const item of data) {
+        const city =
+          item.address?.city ||
+          item.address?.town ||
+          item.address?.municipality ||
+          item.address?.village ||
+          item.name;
+        const state = item.address?.state || '';
+        if (city && !seen.has(city)) {
+          seen.add(city);
+          names.push(state ? `${city}, ${state}` : city);
+        }
+      }
+      setCitySuggestions(names);
+      setShowSuggestions(names.length > 0);
+    } catch {
+      setCitySuggestions([]);
+    }
+  }, []);
+
+  const handleCidadeChange = (value: string) => {
+    setCidade(value);
+    if (autocompleteTimer.current) clearTimeout(autocompleteTimer.current);
+    autocompleteTimer.current = setTimeout(() => fetchCitySuggestions(value), 300);
+  };
+
+  const selectSuggestion = (suggestion: string) => {
+    const cityOnly = suggestion.split(',')[0].trim();
+    setCidade(cityOnly);
+    setCitySuggestions([]);
+    setShowSuggestions(false);
+    allPricesRef.current = [];
+    fetchPrices(cityOnly, activeFuel);
+  };
+
+  const openNavigation = (station: Station) => {
+    const { latitude, longitude, nome, endereco } = station;
+    if (!latitude || !longitude) return;
+    const label = encodeURIComponent(`${nome} — ${endereco}`);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&destination_place_id=${label}&travelmode=driving`;
+    window.open(url, '_blank');
   };
 
   const applyFilter = (all: FuelPriceItem[], tipo: string) => {
@@ -403,13 +459,18 @@ export default function Home() {
             <span className="ai-dot"></span> IA Expert
           </button>
         </div>
-        <div className="location-bar">
+        <div className="location-bar" style={{ position: 'relative' }}>
           <input
             className="location-input"
             placeholder="Digite a cidade..."
             value={cidade}
-            onChange={e => setCidade(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && handleSearch()}
+            onChange={e => handleCidadeChange(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { setShowSuggestions(false); handleSearch(); }
+              if (e.key === 'Escape') setShowSuggestions(false);
+            }}
+            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+            autoComplete="off"
           />
           <button
             className={`gps-btn ${gpsLoading ? 'loading' : ''}`}
@@ -418,6 +479,15 @@ export default function Home() {
           >
             🎯
           </button>
+          {showSuggestions && citySuggestions.length > 0 && (
+            <ul className="city-suggestions">
+              {citySuggestions.map((s, i) => (
+                <li key={i} className="city-suggestion-item" onMouseDown={() => selectSuggestion(s)}>
+                  📍 {s}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       </header>
 
@@ -664,20 +734,30 @@ export default function Home() {
                         <span className="card-footer-time">
                           {isWeb ? '🌐 via pesquisa web' : `🕐 ${timeAgo(g.prices[0].data)}`}
                         </span>
-                        <button
-                          className={`card-action-btn ${isWeb ? 'confirm' : ''}`}
-                          onClick={() => openReport(g.station)}
-                        >
-                          {isWeb ? '✓ Confirmar' : '✏️ Atualizar'}
-                        </button>
+                        <div className="card-footer-actions">
+                          <button
+                            className="card-action-btn nav-btn"
+                            onClick={() => openNavigation(g.station)}
+                            title="Abrir no mapa"
+                          >
+                            🗺️ Ir
+                          </button>
+                          <button
+                            className={`card-action-btn ${isWeb ? 'confirm' : ''}`}
+                            onClick={() => openReport(g.station)}
+                          >
+                            {isWeb ? '✓ Confirmar' : '✏️ Atualizar'}
+                          </button>
+                        </div>
                       </div>
                     </>
                   ) : (
                     <div className="no-price-row">
                       <span className="text-xs text-gray-500">Sem preço cadastrado</span>
-                      <button className="add-price-btn" onClick={() => openReport(g.station)}>
-                        + Adicionar
-                      </button>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button className="card-action-btn nav-btn" onClick={() => openNavigation(g.station)}>🗺️ Ir</button>
+                        <button className="add-price-btn" onClick={() => openReport(g.station)}>+ Adicionar</button>
+                      </div>
                     </div>
                   )}
                 </div>
