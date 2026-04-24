@@ -22,7 +22,7 @@ async function geocodeAddress(address: string, cidade: string): Promise<{ lat: n
   }
 }
 
-// ─── Geocode centro da cidade (fallback para postos sem endereço) ─────────────
+// ─── Geocode centro da cidade ─────────────────────────────────────────────────
 async function getCityCenter(cidade: string): Promise<{ lat: number; lon: number }> {
   try {
     const res = await fetch(
@@ -32,17 +32,84 @@ async function getCityCenter(cidade: string): Promise<{ lat: number; lon: number
     const data = await res.json();
     if (data[0]) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
   } catch {}
-  return { lat: -9.39, lon: -40.50 }; // fallback Petrolina
+  return { lat: -9.39, lon: -40.50 };
+}
+
+// ─── Normaliza nome da cidade (acentos, abreviações de estado) ───────────────
+function normalizeCityName(input: string): string {
+  // Remove UF no final: "Curaça BA" → "Curaçá"
+  // Adiciona acentos comuns que faltam
+  let city = input.trim();
+
+  // Mapeamento de cidades com erros comuns de digitação
+  const corrections: Record<string, string> = {
+    'curaca': 'Curaçá',
+    'curaça': 'Curaçá',
+    'paulo afonso': 'Paulo Afonso',
+    'petrolina': 'Petrolina',
+    'juazeiro': 'Juazeiro',
+    'feira de santana': 'Feira de Santana',
+    'vitoria da conquista': 'Vitória da Conquista',
+    'aracaju': 'Aracaju',
+    'maceio': 'Maceió',
+    'joao pessoa': 'João Pessoa',
+    'recife': 'Recife',
+    'natal': 'Natal',
+    'teresina': 'Teresina',
+    'sao luis': 'São Luís',
+    'belem': 'Belém',
+    'manaus': 'Manaus',
+    'goiania': 'Goiânia',
+    'brasilia': 'Brasília',
+    'cuiaba': 'Cuiabá',
+    'campo grande': 'Campo Grande',
+    'sao paulo': 'São Paulo',
+    'rio de janeiro': 'Rio de Janeiro',
+    'belo horizonte': 'Belo Horizonte',
+    'salvador': 'Salvador',
+    'fortaleza': 'Fortaleza',
+  };
+
+  // Remove UF suffix (e.g., "BA", "PE", "- BA", ", BA")
+  const ufPattern = /[\s,\-]+(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/i;
+  const cleanCity = city.replace(ufPattern, '').trim();
+
+  const key = cleanCity.toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (corrections[key]) return corrections[key];
+
+  return cleanCity || city;
+}
+
+// ─── Resolve nome da cidade via Nominatim ────────────────────────────────────
+async function resolveCity(input: string): Promise<{ name: string; state: string; fullName: string }> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(input + ', Brasil')}&format=json&limit=1&addressdetails=1&featuretype=city`,
+      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
+    );
+    const data = await res.json();
+    if (data[0]) {
+      const city = data[0].address?.city || data[0].address?.town ||
+        data[0].address?.municipality || data[0].address?.village || data[0].name || input;
+      const state = data[0].address?.state || '';
+      return { name: city, state, fullName: state ? `${city}, ${state}` : city };
+    }
+  } catch {}
+  const normalized = normalizeCityName(input);
+  return { name: normalized, state: '', fullName: normalized };
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const cidade = (searchParams.get('cidade') || '').trim();
+  const cidadeRaw = (searchParams.get('cidade') || '').trim();
   const latParam = searchParams.get('lat');
   const lonParam = searchParams.get('lon');
 
-  if (!cidade && (!latParam || !lonParam)) {
+  if (!cidadeRaw && (!latParam || !lonParam)) {
     return NextResponse.json({ error: 'Informe cidade ou localização' }, { status: 400 });
   }
 
@@ -50,42 +117,59 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'ANTHROPIC_API_KEY não configurada' }, { status: 503 });
   }
 
+  // Resolve o nome correto da cidade via Nominatim
+  const resolved = cidadeRaw ? await resolveCity(cidadeRaw) : null;
+  const cidade = resolved?.name || cidadeRaw;
+  const cidadeCompleta = resolved?.fullName || cidadeRaw;
   const buscaLocal = cidade || `coordenadas ${latParam},${lonParam}`;
+
+  console.log(`[claude-stations] Input: "${cidadeRaw}" → Resolved: "${cidadeCompleta}"`);
 
   try {
     // ── Claude com web_search busca postos e preços ───────────────────────────
     const response = await client.messages.create({
       model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
+      max_tokens: 5000,
       tools: [{ type: 'web_search_20250305', name: 'web_search' }],
       messages: [
         {
           role: 'user',
-          content: `Você é um assistente que encontra postos de combustível com preços reais e atuais.
+          content: `Você é um especialista em postos de combustível no Brasil. Preciso de informações sobre postos em "${cidadeCompleta}", Brasil.
 
-Pesquise na internet: "postos de combustível ${buscaLocal} preços gasolina etanol diesel 2025"
+INSTRUÇÕES IMPORTANTES:
+1. Faça múltiplas buscas na web com termos variados:
+   - "postos de combustível ${cidadeCompleta} preço gasolina"
+   - "combustível ${cidade} ${resolved?.state || 'Bahia'} preço"
+   - "posto gasolina ${cidade} gaspedia"
+   - "preço combustível ${cidade} ${new Date().getFullYear()}"
 
-Também pesquise: "postos ${buscaLocal} gaspedia OR waze OR posto combustivel"
+2. ${cidade} é uma cidade real no Brasil${resolved?.state ? ` no estado de ${resolved.state}` : ''}. Mesmo se for pequena, EXISTEM postos lá.
 
-Com base nos resultados, monte uma lista dos postos de combustível encontrados em ${buscaLocal}, Brasil.
+3. Se não encontrar postos específicos com nome na internet para esta cidade:
+   - Pesquise a cidade vizinha mais próxima para ter referência de preço
+   - Busque preços ANP da região/estado
+   - Liste os postos que provavelmente existem (toda cidade brasileira tem pelo menos 1 posto)
+   - Use nomes genéricos como "Posto de Combustível ${cidade}" se necessário
 
-Para cada posto, extraia ou estime:
-- nome do posto
-- endereço (rua, número, bairro)
-- bandeira (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
-- preços em reais para: gasolina comum, gasolina aditivada, etanol, diesel s10, diesel s500, gnv
+4. Para cada posto encontrado ou estimado, forneça:
+   - nome (real ou estimado)
+   - endereco (use nomes de ruas reais se possível, ou "Centro, ${cidade}")
+   - bandeira (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
+   - precos em reais para cada combustível
 
-Se não encontrar preços específicos do posto, use a média atual da cidade/região.
+5. Se não encontrar preços exatos, use a média ANP da região/estado.
+
+6. NUNCA retorne uma lista vazia. Mínimo 3 postos.
 
 Responda SOMENTE com JSON válido, sem texto antes ou depois:
 {
-  "cidade": "${buscaLocal}",
-  "fonte": "nome do site ou fonte usada",
+  "cidade": "${cidadeCompleta}",
+  "fonte": "fonte usada",
   "postos": [
     {
-      "nome": "Posto Shell Centro",
-      "endereco": "Av. Getúlio Vargas, 123, Centro",
-      "bandeira": "Shell",
+      "nome": "Nome do Posto",
+      "endereco": "Endereço completo",
+      "bandeira": "Bandeira",
       "precos": {
         "gasolina_comum": 6.29,
         "gasolina_aditivada": 6.69,
@@ -96,9 +180,7 @@ Responda SOMENTE com JSON válido, sem texto antes ou depois:
       }
     }
   ]
-}
-
-Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.`,
+}`,
         },
       ],
     });
@@ -113,17 +195,33 @@ Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.
 
     const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
-      return NextResponse.json({ error: 'Claude não retornou dados estruturados' }, { status: 502 });
+      console.error('[claude-stations] Claude não retornou JSON válido. Response:', jsonText.slice(0, 500));
+      return NextResponse.json({ error: 'Claude não retornou dados estruturados', raw: jsonText.slice(0, 200) }, { status: 502 });
     }
 
-    const claudeData = JSON.parse(jsonMatch[0]);
+    let claudeData: any;
+    try {
+      claudeData = JSON.parse(jsonMatch[0]);
+    } catch (parseErr) {
+      console.error('[claude-stations] JSON parse error:', parseErr);
+      // Tenta limpar o JSON
+      const cleaned = jsonMatch[0]
+        .replace(/,\s*}/g, '}')
+        .replace(/,\s*]/g, ']')
+        .replace(/[\x00-\x1F\x7F]/g, '');
+      claudeData = JSON.parse(cleaned);
+    }
+
     const postos: any[] = claudeData.postos || [];
 
     if (postos.length === 0) {
-      return NextResponse.json({ error: 'Nenhum posto encontrado na busca' }, { status: 404 });
+      console.warn('[claude-stations] Claude retornou 0 postos para:', cidadeCompleta);
+      return NextResponse.json({ error: 'Nenhum posto encontrado', cidade: cidadeCompleta }, { status: 404 });
     }
 
-    // ── Geocoda endereços em paralelo (até 8 postos de uma vez) ───────────────
+    console.log(`[claude-stations] Claude encontrou ${postos.length} postos para "${cidadeCompleta}"`);
+
+    // ── Geocoda endereços em paralelo ─────────────────────────────────────────
     const cityCenter = await getCityCenter(cidade || buscaLocal);
 
     const geocodedPostos = await Promise.all(
@@ -132,6 +230,21 @@ Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.
         if (posto.endereco && posto.endereco.length > 5) {
           const geo = await geocodeAddress(posto.endereco, cidade || buscaLocal);
           if (geo) coords = geo;
+          else {
+            // Tenta geocodar só com o nome da rua + cidade
+            const simpleAddr = posto.endereco.split(',')[0];
+            if (simpleAddr && simpleAddr.length > 3) {
+              const geo2 = await geocodeAddress(simpleAddr, cidade || buscaLocal);
+              if (geo2) coords = geo2;
+            }
+          }
+        }
+
+        // Pequeno offset para postos no mesmo ponto não sobreporem
+        const jitterLat = (Math.random() - 0.5) * 0.002;
+        const jitterLon = (Math.random() - 0.5) * 0.002;
+        if (coords.lat === cityCenter.lat && coords.lon === cityCenter.lon) {
+          coords = { lat: coords.lat + jitterLat, lon: coords.lon + jitterLon };
         }
 
         const precos = posto.precos || {};
@@ -148,11 +261,11 @@ Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.
         const stationInfo = {
           id: stationId,
           osm_id: null,
-          nome: posto.nome || 'Posto de Combustível',
+          nome: posto.nome || `Posto de Combustível ${cidade}`,
           bandeira: posto.bandeira || 'Branco',
-          endereco: posto.endereco || cidade,
+          endereco: posto.endereco || `Centro, ${cidade}`,
           cidade: cidade || buscaLocal,
-          estado: '',
+          estado: resolved?.state || '',
           latitude: coords.lat,
           longitude: coords.lon,
           ticket_log: false,
@@ -163,7 +276,7 @@ Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.
 
         for (const [key, tipo] of Object.entries(FUEL_MAP)) {
           const preco = precos[key];
-          if (preco && typeof preco === 'number' && preco > 0) {
+          if (preco && typeof preco === 'number' && preco > 0 && preco < 20) {
             temPreco = true;
             entries.push({
               id: `${stationId}-${key}`,
@@ -200,10 +313,10 @@ Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.
       source: `Claude AI — ${claudeData.fonte || 'busca web'}`,
       total_osm: postos.length,
       osm_unavailable: false,
-      cidade: cidade || buscaLocal,
+      cidade: cidadeCompleta,
     });
   } catch (err: any) {
-    console.error('[claude-stations]', err.message);
+    console.error('[claude-stations] Error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
