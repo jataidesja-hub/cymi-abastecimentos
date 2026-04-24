@@ -1,32 +1,36 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&display=swap');
 
 :root {
-  --bg-primary: #0a0e1a;
-  --bg-secondary: #111827;
-  --bg-card: #1a2235;
-  --bg-card-hover: #1f2a40;
-  --bg-glass: rgba(26, 34, 53, 0.8);
-  --accent-green: #10b981;
-  --accent-green-light: #34d399;
+  /* ── CYMI GO Color Palette ── */
+  --cymi-green: #1a5f37;
+  --cymi-green-mid: #2a8a52;
+  --cymi-green-light: #4ade80;
+
+  --bg-primary: #07120a;
+  --bg-secondary: #0d1f12;
+  --bg-card: #112618;
+  --bg-card-hover: #163020;
+  --bg-glass: rgba(17, 38, 24, 0.85);
+  --accent-green: #2ecc71;
+  --accent-green-light: #4ade80;
   --accent-blue: #3b82f6;
   --accent-blue-light: #60a5fa;
   --accent-purple: #8b5cf6;
   --accent-orange: #f59e0b;
   --accent-red: #ef4444;
   --accent-cyan: #06b6d4;
-  --accent-cyan: #06b6d4;
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-muted: #64748b;
-  --border-color: rgba(148, 163, 184, 0.1);
-  --border-glow: rgba(59, 130, 246, 0.3);
-  --gradient-1: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  --gradient-2: linear-gradient(135deg, #10b981 0%, #06b6d4 100%);
+  --text-primary: #f0faf4;
+  --text-secondary: #a7c4b0;
+  --text-muted: #5a8a6a;
+  --border-color: rgba(46, 204, 113, 0.12);
+  --border-glow: rgba(46, 204, 113, 0.35);
+  --gradient-1: linear-gradient(135deg, #1a5f37 0%, #2a8a52 100%);
+  --gradient-2: linear-gradient(135deg, #1a5f37 0%, #2ecc71 100%);
   --gradient-3: linear-gradient(135deg, #f59e0b 0%, #ef4444 100%);
-  --gradient-ai: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
-  --gradient-hero: linear-gradient(135deg, #0a0e1a 0%, #1a1a2e 50%, #16213e 100%);
-  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.3);
-  --shadow-glow: 0 0 30px rgba(59, 130, 246, 0.15);
+  --gradient-ai: linear-gradient(135deg, #1a5f37 0%, #06b6d4 100%);
+  --gradient-hero: linear-gradient(160deg, #07120a 0%, #0d1f12 50%, #112618 100%);
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 30px rgba(46, 204, 113, 0.15);
   --radius: 16px;
   --radius-sm: 10px;
   --radius-lg: 24px;
@@ -1184,5 +1188,162 @@ body {
   background: rgba(59, 130, 246, 0.15);
   color: var(--accent-blue-light);
   border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+/* ===== PWA INSTALL BANNER (Android) ===== */
+.install-banner {
+  position: fixed;
+  bottom: 80px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32px);
+  max-width: 448px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-glow);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(46,204,113,0.1);
+  z-index: 400;
+  animation: slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+.install-icon { flex-shrink: 0; }
+
+.install-info { flex: 1; min-width: 0; }
+
+.install-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.install-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  margin-top: 1px;
+}
+
+.install-btn {
+  flex-shrink: 0;
+  padding: 7px 16px;
+  border-radius: 20px;
+  border: none;
+  background: var(--gradient-2);
+  color: white;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: 'Inter', sans-serif;
+  transition: opacity 0.2s;
+}
+
+.install-btn:hover { opacity: 0.85; }
+
+.install-close {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 4px;
+  line-height: 1;
+}
+
+/* ===== PWA INSTALL OVERLAY (iOS) ===== */
+.install-ios-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(8px);
+  z-index: 500;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 16px 16px;
+}
+
+.install-ios-card {
+  width: 100%;
+  max-width: 480px;
+  background: var(--bg-secondary);
+  border-radius: 24px 24px 20px 20px;
+  padding: 28px 24px 24px;
+  border: 1px solid var(--border-glow);
+  position: relative;
+  animation: slideUp 0.4s cubic-bezier(0.34,1.56,0.64,1);
+}
+
+.install-close-abs {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  font-size: 16px;
+}
+
+.install-ios-title {
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--text-primary);
+  text-align: center;
+  margin-bottom: 6px;
+}
+
+.install-ios-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  text-align: center;
+  margin-bottom: 20px;
+  line-height: 1.5;
+}
+
+.install-ios-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.ios-step {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: var(--bg-card);
+  border-radius: 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.ios-step strong { color: var(--text-primary); }
+
+.ios-step-num {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--gradient-2);
+  color: white;
+  font-size: 13px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ios-arrow-down {
+  text-align: center;
+  font-size: 24px;
+  color: var(--accent-green);
+  animation: bounce-arrow 1.5s ease-in-out infinite;
+}
+
+@keyframes bounce-arrow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(6px); }
 }
 

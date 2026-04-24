@@ -1,12 +1,14 @@
 {
-  "name": "Combustível Barato",
-  "short_name": "Combustível",
-  "description": "Encontre os postos de combustível mais baratos da sua cidade",
+  "name": "CYMI GO — Combustível Inteligente",
+  "short_name": "CYMI GO",
+  "description": "Encontre postos de combustível com os melhores preços da sua região. Gasolina, Etanol, Diesel e GNV em tempo real.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#0a0e1a",
-  "theme_color": "#0a0e1a",
+  "background_color": "#07120a",
+  "theme_color": "#1a5f37",
   "orientation": "portrait",
+  "categories": ["utilities", "navigation", "lifestyle"],
+  "lang": "pt-BR",
   "icons": [
     {
       "src": "/icon-192.png",
@@ -19,6 +21,22 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    },
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [],
+  "shortcuts": [
+    {
+      "name": "Buscar postos",
+      "short_name": "Buscar",
+      "description": "Busque postos de combustível por cidade",
+      "url": "/",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }
   ]
 }

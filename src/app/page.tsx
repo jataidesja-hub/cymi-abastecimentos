@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
+import InstallPrompt from '@/components/InstallPrompt';
 
 const GasMap = dynamic(() => import('@/components/Map'), {
   ssr: false,
@@ -344,10 +345,10 @@ export default function Home() {
       <header className="app-header">
         <div className="header-top">
           <div className="app-logo">
-            <div className="logo-icon">⛽</div>
+            <img src="/icon.svg" alt="CYMI GO" className="logo-icon" style={{borderRadius:10, objectFit:'cover'}} />
             <div className="logo-text">
-              <h1>Combustível Barato</h1>
-              <p>Dados reais da comunidade</p>
+              <h1>CYMI GO</h1>
+              <p>Combustível Inteligente</p>
             </div>
           </div>
           <button
@@ -643,6 +644,8 @@ export default function Home() {
           </div>
         )}
       </main>
+
+      <InstallPrompt />
 
       {/* ── Bottom Nav ── */}
       <nav className="bottom-nav">

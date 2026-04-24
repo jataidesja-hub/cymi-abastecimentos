@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="#1a5f37"/>
+
+  <!-- Horizontal stripes (CYMI logo pattern) -->
+  <rect x="48" y="120" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
+  <rect x="48" y="176" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
+  <rect x="48" y="232" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
+  <rect x="48" y="288" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
+
+  <!-- CYMI text -->
+  <text x="256" y="240" font-family="Arial Black, Arial, sans-serif" font-weight="900"
+        font-size="128" fill="white" text-anchor="middle" dominant-baseline="middle"
+        letter-spacing="-4">CYMI</text>
+
+  <!-- GO text -->
+  <text x="256" y="360" font-family="Arial, sans-serif" font-weight="700"
+        font-size="88" fill="#4ade80" text-anchor="middle" dominant-baseline="middle"
+        letter-spacing="12">GO</text>
+
+  <!-- Fuel drop icon -->
+  <path d="M420 80 C420 60 400 40 400 40 C400 40 380 60 380 80 C380 100 389 115 400 115 C411 115 420 100 420 80Z"
+        fill="#4ade80" opacity="0.9"/>
+</svg>
