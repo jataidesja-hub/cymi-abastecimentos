@@ -7,12 +7,11 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   icons: {
     icon: [
-      { url: "/api/icon?size=32", sizes: "32x32", type: "image/png" },
-      { url: "/api/icon?size=192", sizes: "192x192", type: "image/png" },
       { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
     ],
-    apple: [{ url: "/api/icon?size=192", sizes: "192x192", type: "image/png" }],
-    shortcut: "/api/icon?size=192",
+    apple: [{ url: "/icon-192.png", sizes: "192x192" }],
+    shortcut: "/icon.svg",
   },
   appleWebApp: {
     capable: true,
@@ -47,8 +46,8 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
         <meta name="apple-mobile-web-app-title" content="MAPM" />
-        <link rel="apple-touch-icon" href="/api/icon?size=192" />
-        <link rel="apple-touch-startup-image" href="/api/icon?size=512" />
+        <link rel="apple-touch-icon" href="/icon-192.png" />
+        <link rel="apple-touch-startup-image" href="/icon-512.png" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="application-name" content="MAPM" />
       </head>

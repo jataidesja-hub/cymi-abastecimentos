@@ -1,21 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
-
-const CACHE_TTL = 30 * 60 * 1000;
-function getCacheKey(cidade: string) { return `mapm-v1-${cidade.toLowerCase().trim()}`; }
-function saveCache(cidade: string, data: FuelPriceItem[], source: string) {
-  try { sessionStorage.setItem(getCacheKey(cidade), JSON.stringify({ data, source, ts: Date.now() })); } catch {}
-}
-function loadCache(cidade: string): { data: FuelPriceItem[]; source: string } | null {
-  try {
-    const raw = sessionStorage.getItem(getCacheKey(cidade));
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    if (Date.now() - parsed.ts > CACHE_TTL) return null;
-    return { data: parsed.data, source: parsed.source };
-  } catch { return null; }
-}
+import { useState, useCallback, useMemo } from 'react';
 import dynamic from 'next/dynamic';
 import InstallPrompt from '@/components/InstallPrompt';
 
@@ -94,7 +79,6 @@ export default function Home() {
   const [activeFuel, setActiveFuel] = useState('Todos');
   const [ticketLogOnly, setTicketLogOnly] = useState(false); // eslint-disable-line
   const [prices, setPrices] = useState<FuelPriceItem[]>([]);
-  const allPricesRef = useRef<FuelPriceItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -121,27 +105,9 @@ export default function Home() {
     setTimeout(() => setToast(''), 3500);
   };
 
-  const applyFilter = (all: FuelPriceItem[], tipo: string) => {
-    if (!tipo || tipo === 'Todos') return all;
-    return all.filter(d => d.tipo_combustivel === tipo || d.tipo_combustivel === 'sem_preco');
-  };
-
   const fetchPrices = useCallback(
     async (cidadeBusca: string, tipo?: string, coords?: { lat: number; lng: number }) => {
       if (!cidadeBusca.trim() && !coords) return;
-
-      // Verifica cache primeiro
-      if (cidadeBusca.trim()) {
-        const cached = loadCache(cidadeBusca.trim());
-        if (cached && cached.data.length > 0) {
-          allPricesRef.current = cached.data;
-          setPrices(applyFilter(cached.data, tipo || 'Todos'));
-          setSource(cached.source + ' (cache)');
-          setSearched(true);
-          return;
-        }
-      }
-
       setLoading(true);
       setSearched(true);
       setPrices([]);
@@ -154,15 +120,17 @@ export default function Home() {
           params.append('lon', String(coords.lng));
         }
 
-        // Claude AI como fonte primária
+        // Claude AI como fonte primária — busca postos + preços na web
         const res = await fetch(`/api/claude-stations?${params}`);
         const json = await res.json();
 
         if (!json.error && json.data && json.data.length > 0) {
           const data: FuelPriceItem[] = json.data;
-          allPricesRef.current = data;
-          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, json.source || 'Claude AI');
-          setPrices(applyFilter(data, tipo || 'Todos'));
+          // Filtra por tipo se selecionado
+          const filtered = tipo && tipo !== 'Todos'
+            ? data.filter(d => d.tipo_combustivel === tipo || d.tipo_combustivel === 'sem_preco')
+            : data;
+          setPrices(filtered);
           setSource(json.source || 'Claude AI');
           return;
         }
@@ -172,9 +140,7 @@ export default function Home() {
         const fallbackRes = await fetch(`/api/stations?${params}`);
         const fallbackJson = await fallbackRes.json();
         const fallbackData: FuelPriceItem[] = fallbackJson.data || [];
-        allPricesRef.current = fallbackData;
-        if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), fallbackData, fallbackJson.source || 'OpenStreetMap');
-        setPrices(applyFilter(fallbackData, tipo || 'Todos'));
+        setPrices(fallbackData);
         setSource(fallbackJson.source || 'OpenStreetMap');
         setWebPricesLoading(false);
 
@@ -185,24 +151,16 @@ export default function Home() {
         setWebPricesLoading(false);
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
   const handleSearch = () => {
-    if (cidade.trim()) {
-      allPricesRef.current = [];
-      fetchPrices(cidade, activeFuel);
-    }
+    if (cidade.trim()) fetchPrices(cidade, activeFuel);
   };
 
   const handleFuelFilter = (tipo: string) => {
     setActiveFuel(tipo);
-    if (allPricesRef.current.length > 0) {
-      setPrices(applyFilter(allPricesRef.current, tipo));
-    } else if (cidade || userLocation) {
-      fetchPrices(cidade, tipo, userLocation || undefined);
-    }
+    if (cidade || userLocation) fetchPrices(cidade, tipo, userLocation || undefined);
   };
 
   const handleGPS = async () => {
@@ -387,7 +345,7 @@ export default function Home() {
       <header className="app-header">
         <div className="header-top">
           <div className="app-logo">
-            <img src="/api/icon?size=42" alt="MAPM" className="logo-icon" style={{borderRadius:10, objectFit:'cover'}} />
+            <img src="/icon.svg" alt="MAPM" className="logo-icon" style={{borderRadius:10, objectFit:'cover'}} />
             <div className="logo-text">
               <h1>MAPM</h1>
               <p>Melhor Abastecimento na Palma da Mão</p>

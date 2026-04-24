@@ -4,12 +4,10 @@ import { createClient } from '@supabase/supabase-js';
 // Vercel: aumenta o timeout máximo desta rota para 25s (Hobby plan suporta até 60s)
 export const maxDuration = 25;
 
-function getSupabase() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !key) return null;
-  return createClient(url, key);
-}
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+);
 
 // ─── Overpass: tenta os 3 mirrors em paralelo e pega o mais rápido ────────────
 const OVERPASS_MIRRORS = [
@@ -157,8 +155,6 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Informe cidade ou localização GPS' }, { status: 400 });
     }
 
-    const supabase = getSupabase();
-
     // 1. Postos reais do OpenStreetMap
     let osmElements: any[] | null = null;
     if (latParam && lonParam) {
@@ -174,35 +170,28 @@ export async function GET(request: NextRequest) {
     const osmIds = osmElements.map((e: any) => e.id);
 
     // 2. Supabase em paralelo (por osm_id e por cidade)
-    let dbByOsmId: any[] = [];
-    let dbByCity: any[] = [];
-
-    if (supabase) {
-      const [r1, r2] = await Promise.all([
-        supabase.from('stations').select('*').in('osm_id', osmIds),
-        supabase.from('stations').select('*').ilike('cidade', `%${cidadeFinal}%`),
-      ]);
-      dbByOsmId = r1.data || [];
-      dbByCity = r2.data || [];
-    }
+    const [{ data: dbByOsmId }, { data: dbByCity }] = await Promise.all([
+      supabase.from('stations').select('*').in('osm_id', osmIds),
+      supabase.from('stations').select('*').ilike('cidade', `%${cidadeFinal}%`),
+    ]);
 
     const osmIdToDb = new Map<number, any>();
-    dbByOsmId.forEach((s: any) => {
+    (dbByOsmId || []).forEach((s: any) => {
       if (s.osm_id != null) osmIdToDb.set(Number(s.osm_id), s);
     });
 
     const dbIdToStation = new Map<string, any>();
-    dbByCity.forEach((s: any) => dbIdToStation.set(s.id, s));
+    (dbByCity || []).forEach((s: any) => dbIdToStation.set(s.id, s));
 
     // 3. Preços Supabase para todos os postos encontrados
     const allDbIds = [
-      ...dbByOsmId.map((s: any) => s.id),
-      ...dbByCity.map((s: any) => s.id),
+      ...(dbByOsmId || []).map((s: any) => s.id),
+      ...(dbByCity || []).map((s: any) => s.id),
     ].filter((v, i, a) => a.indexOf(v) === i);
 
     const pricesMap = new Map<string, any[]>();
 
-    if (supabase && allDbIds.length > 0) {
+    if (allDbIds.length > 0) {
       let q = supabase
         .from('fuel_prices')
         .select('*')
