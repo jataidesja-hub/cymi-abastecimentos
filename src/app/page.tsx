@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
+import { useState, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import InstallPrompt from '@/components/InstallPrompt';
 
@@ -75,6 +75,7 @@ function timeAgo(dateStr: string): string {
 }
 
 export default function Home() {
+  const allPricesRef = useRef<FuelPriceItem[]>([]);
   const [cidade, setCidade] = useState('');
   const [activeFuel, setActiveFuel] = useState('Todos');
   const [ticketLogOnly, setTicketLogOnly] = useState(false); // eslint-disable-line
@@ -126,7 +127,7 @@ export default function Home() {
 
         if (!json.error && json.data && json.data.length > 0) {
           const data: FuelPriceItem[] = json.data;
-          // Filtra por tipo se selecionado
+          allPricesRef.current = data;
           const filtered = tipo && tipo !== 'Todos'
             ? data.filter(d => d.tipo_combustivel === tipo || d.tipo_combustivel === 'sem_preco')
             : data;
@@ -140,6 +141,7 @@ export default function Home() {
         const fallbackRes = await fetch(`/api/stations?${params}`);
         const fallbackJson = await fallbackRes.json();
         const fallbackData: FuelPriceItem[] = fallbackJson.data || [];
+        allPricesRef.current = fallbackData;
         setPrices(fallbackData);
         setSource(fallbackJson.source || 'OpenStreetMap');
         setWebPricesLoading(false);
@@ -155,12 +157,23 @@ export default function Home() {
   );
 
   const handleSearch = () => {
-    if (cidade.trim()) fetchPrices(cidade, activeFuel);
+    if (cidade.trim()) {
+      allPricesRef.current = [];
+      try { sessionStorage.clear(); } catch {}
+      fetchPrices(cidade, activeFuel);
+    }
   };
 
   const handleFuelFilter = (tipo: string) => {
     setActiveFuel(tipo);
-    if (cidade || userLocation) fetchPrices(cidade, tipo, userLocation || undefined);
+    if (allPricesRef.current.length > 0) {
+      const filtered = tipo === 'Todos'
+        ? allPricesRef.current
+        : allPricesRef.current.filter(d => d.tipo_combustivel === tipo || d.tipo_combustivel === 'sem_preco');
+      setPrices(filtered);
+    } else if (cidade || userLocation) {
+      fetchPrices(cidade, tipo, userLocation || undefined);
+    }
   };
 
   const handleGPS = async () => {

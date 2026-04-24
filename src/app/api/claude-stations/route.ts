@@ -61,44 +61,40 @@ export async function GET(request: NextRequest) {
       messages: [
         {
           role: 'user',
-          content: `Você é um assistente que encontra postos de combustível com preços reais e atuais.
+          content: `Pesquise na internet os preços REAIS e ATUAIS de combustível em postos de ${buscaLocal}, Brasil.
 
-Pesquise na internet: "postos de combustível ${buscaLocal} preços gasolina etanol diesel 2025"
+Faça as seguintes pesquisas:
+1. "preço gasolina ${buscaLocal} 2025 posto"
+2. "preço etanol diesel ${buscaLocal} hoje"
+3. site:dedurapreco.com "${buscaLocal}"
 
-Também pesquise: "postos ${buscaLocal} gaspedia OR waze OR posto combustivel"
+IMPORTANTE:
+- Retorne APENAS postos com dados encontrados na web — NÃO invente postos ou preços
+- Cada posto pode ter preços DIFERENTES entre si — NÃO use o mesmo valor para todos
+- Use null para combustíveis que não encontrou para aquele posto específico
+- O endereço deve ser o real encontrado na busca (rua, número, bairro)
+- A bandeira deve ser a real do posto (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
 
-Com base nos resultados, monte uma lista dos postos de combustível encontrados em ${buscaLocal}, Brasil.
-
-Para cada posto, extraia ou estime:
-- nome do posto
-- endereço (rua, número, bairro)
-- bandeira (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
-- preços em reais para: gasolina comum, gasolina aditivada, etanol, diesel s10, diesel s500, gnv
-
-Se não encontrar preços específicos do posto, use a média atual da cidade/região.
-
-Responda SOMENTE com JSON válido, sem texto antes ou depois:
+Responda SOMENTE com JSON válido:
 {
   "cidade": "${buscaLocal}",
-  "fonte": "nome do site ou fonte usada",
+  "fonte": "nome do site usado",
   "postos": [
     {
-      "nome": "Posto Shell Centro",
-      "endereco": "Av. Getúlio Vargas, 123, Centro",
+      "nome": "Nome Real do Posto",
+      "endereco": "Endereço Real, Bairro",
       "bandeira": "Shell",
       "precos": {
         "gasolina_comum": 6.29,
-        "gasolina_aditivada": 6.69,
-        "etanol": 4.21,
-        "diesel_s10": 6.08,
-        "diesel_s500": 5.89,
+        "gasolina_aditivada": null,
+        "etanol": 4.15,
+        "diesel_s10": null,
+        "diesel_s500": null,
         "gnv": null
       }
     }
   ]
-}
-
-Inclua pelo menos 5 postos se encontrar. Use null para preços não encontrados.`,
+}`,
         },
       ],
     });
