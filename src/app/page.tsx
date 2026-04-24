@@ -210,30 +210,72 @@ export default function Home() {
           params.append('lon', String(coords.lng));
         }
 
-        // Claude AI como fonte primária
-        const res = await fetch(`/api/claude-stations?${params}`);
-        const json = await res.json();
+        // Fonte primária: OpenStreetMap (postos reais)
+        const osmRes = await fetch(`/api/stations?${params}`);
+        const osmJson = await osmRes.json();
+        const osmData: FuelPriceItem[] = osmJson.data || [];
 
-        if (!json.error && json.data && json.data.length > 0) {
-          const data: FuelPriceItem[] = json.data;
-          allPricesRef.current = data;
-          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, json.source || 'Claude AI');
-          setPrices(applyFilter(data, tipo || 'Todos'));
-          setSource(json.source || 'Claude AI');
+        if (osmData.length > 0) {
+          // Postos reais encontrados — busca preços regionais em paralelo
+          setWebPricesLoading(true);
+          const webPricesRes = await fetch(`/api/web-prices?${params}`).catch(() => null);
+          const webPrices = webPricesRes ? await webPricesRes.json().catch(() => null) : null;
+
+          // Converte resposta do web-prices { prices: {...} } para FuelPriceItem[]
+          const FUEL_KEY_MAP: Record<string, string> = {
+            gasolina_comum: 'Gasolina Comum', gasolina_aditivada: 'Gasolina Aditivada',
+            etanol: 'Etanol', diesel_s10: 'Diesel S10', diesel_s500: 'Diesel S500', gnv: 'GNV',
+          };
+          const regionalPrices: { tipo: string; preco: number }[] = [];
+          if (webPrices?.prices) {
+            for (const [key, tipo] of Object.entries(FUEL_KEY_MAP)) {
+              const preco = webPrices.prices[key];
+              if (preco && typeof preco === 'number' && preco > 0) {
+                regionalPrices.push({ tipo, preco });
+              }
+            }
+          }
+
+          // Aplica preços regionais nos postos sem preço
+          let finalData = osmData;
+          if (regionalPrices.length > 0) {
+            const withPrice = new Set(
+              osmData.filter(d => d.preco > 0 && d.tipo_combustivel !== 'sem_preco').map(d => d.stations.id)
+            );
+            const semPreco = osmData.filter(d => d.tipo_combustivel === 'sem_preco' && !withPrice.has(d.stations.id));
+
+            const extras: FuelPriceItem[] = [];
+            semPreco.forEach(sp => {
+              regionalPrices.forEach(rp => {
+                extras.push({
+                  id: `${sp.stations.id}-${rp.tipo}`,
+                  tipo_combustivel: rp.tipo,
+                  preco: rp.preco,
+                  data_atualizacao: new Date().toISOString(),
+                  reportado_por: 'estimativa regional',
+                  stations: sp.stations,
+                });
+              });
+            });
+
+            if (extras.length > 0) {
+              const semPrecoIds = new Set(semPreco.map(d => d.stations.id));
+              finalData = [
+                ...osmData.filter(d => !semPrecoIds.has(d.stations.id)),
+                ...extras,
+              ];
+            }
+          }
+
+          allPricesRef.current = finalData;
+          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), finalData, 'OpenStreetMap');
+          setPrices(applyFilter(finalData, tipo || 'Todos'));
+          setSource('OpenStreetMap');
+          setWebPricesLoading(false);
           return;
         }
 
-        // Fallback: /api/stations (OSM + Supabase)
-        setWebPricesLoading(true);
-        const fallbackRes = await fetch(`/api/stations?${params}`);
-        const fallbackJson = await fallbackRes.json();
-        const fallbackData: FuelPriceItem[] = fallbackJson.data || [];
-        allPricesRef.current = fallbackData;
-        if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), fallbackData, fallbackJson.source || 'OpenStreetMap');
-        setPrices(applyFilter(fallbackData, tipo || 'Todos'));
-        setSource(fallbackJson.source || 'OpenStreetMap');
-        setWebPricesLoading(false);
-
+        showToast('Nenhum posto encontrado nessa cidade no OpenStreetMap', 'error');
       } catch {
         showToast('Erro ao buscar dados', 'error');
       } finally {
@@ -664,7 +706,7 @@ export default function Home() {
 
             {groupedStations.map((g, i) => {
               const hasPrices = g.prices.length > 0;
-              const isWeb = g.prices.some(p => p.fonte === 'pesquisa web');
+              const isWeb = g.prices.some(p => p.fonte === 'estimativa regional' || p.fonte === 'pesquisa web');
               const isTicketLog =
                 g.station.ticket_log ||
                 prices.find(p => p.stations.id === g.station.id)?.ticket_log === 'Sim';
