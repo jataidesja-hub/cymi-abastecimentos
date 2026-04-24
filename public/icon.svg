@@ -1,24 +1,24 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <!-- Background -->
-  <rect width="512" height="512" rx="96" fill="#1a5f37"/>
+  <rect width="512" height="512" rx="100" fill="#1a5f37"/>
 
-  <!-- Horizontal stripes (CYMI logo pattern) -->
-  <rect x="48" y="120" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
-  <rect x="48" y="176" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
-  <rect x="48" y="232" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
-  <rect x="48" y="288" width="160" height="32" rx="6" fill="rgba(255,255,255,0.25)"/>
+  <!-- Stripes pattern (CYMI style) -->
+  <rect x="36" y="100" width="130" height="24" rx="5" fill="rgba(255,255,255,0.2)"/>
+  <rect x="36" y="144" width="130" height="24" rx="5" fill="rgba(255,255,255,0.2)"/>
+  <rect x="36" y="188" width="130" height="24" rx="5" fill="rgba(255,255,255,0.2)"/>
+  <rect x="36" y="232" width="130" height="24" rx="5" fill="rgba(255,255,255,0.2)"/>
 
-  <!-- CYMI text -->
-  <text x="256" y="240" font-family="Arial Black, Arial, sans-serif" font-weight="900"
-        font-size="128" fill="white" text-anchor="middle" dominant-baseline="middle"
-        letter-spacing="-4">CYMI</text>
+  <!-- MAPM text -->
+  <text x="265" y="230" font-family="Arial Black, Arial, sans-serif" font-weight="900"
+        font-size="148" fill="white" text-anchor="middle" dominant-baseline="middle"
+        letter-spacing="-6">MAPM</text>
 
-  <!-- GO text -->
-  <text x="256" y="360" font-family="Arial, sans-serif" font-weight="700"
-        font-size="88" fill="#4ade80" text-anchor="middle" dominant-baseline="middle"
-        letter-spacing="12">GO</text>
+  <!-- Subtitle -->
+  <text x="265" y="330" font-family="Arial, sans-serif" font-weight="500"
+        font-size="38" fill="rgba(255,255,255,0.55)" text-anchor="middle"
+        letter-spacing="3">by CYMI</text>
 
-  <!-- Fuel drop icon -->
-  <path d="M420 80 C420 60 400 40 400 40 C400 40 380 60 380 80 C380 100 389 115 400 115 C411 115 420 100 420 80Z"
-        fill="#4ade80" opacity="0.9"/>
+  <!-- Fuel drop -->
+  <path d="M446 108 C446 84 424 62 424 62 C424 62 402 84 402 108 C402 132 412 148 424 148 C436 148 446 132 446 108Z"
+        fill="#4ade80"/>
 </svg>

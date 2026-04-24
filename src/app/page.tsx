@@ -345,10 +345,10 @@ export default function Home() {
       <header className="app-header">
         <div className="header-top">
           <div className="app-logo">
-            <img src="/icon.svg" alt="CYMI GO" className="logo-icon" style={{borderRadius:10, objectFit:'cover'}} />
+            <img src="/icon.svg" alt="MAPM" className="logo-icon" style={{borderRadius:10, objectFit:'cover'}} />
             <div className="logo-text">
-              <h1>CYMI GO</h1>
-              <p>Combustível Inteligente</p>
+              <h1>MAPM</h1>
+              <p>Melhor Abastecimento na Palma da Mão</p>
             </div>
           </div>
           <button

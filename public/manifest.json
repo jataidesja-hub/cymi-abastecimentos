@@ -1,7 +1,7 @@
 {
-  "name": "CYMI GO — Combustível Inteligente",
-  "short_name": "CYMI GO",
-  "description": "Encontre postos de combustível com os melhores preços da sua região. Gasolina, Etanol, Diesel e GNV em tempo real.",
+  "name": "MAPM — Melhor Abastecimento na Palma da Mão",
+  "short_name": "MAPM",
+  "description": "Melhor Abastecimento na Palma da Mão. Encontre postos com os melhores preços de gasolina, etanol, diesel e GNV em tempo real. by CYMI",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#07120a",
@@ -29,12 +29,11 @@
       "purpose": "any"
     }
   ],
-  "screenshots": [],
   "shortcuts": [
     {
       "name": "Buscar postos",
       "short_name": "Buscar",
-      "description": "Busque postos de combustível por cidade",
+      "description": "Encontre o melhor preço perto de você",
       "url": "/",
       "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
     }

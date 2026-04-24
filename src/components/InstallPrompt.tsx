@@ -15,7 +15,7 @@ export default function InstallPrompt() {
 
   useEffect(() => {
     // Não mostra se já instalado ou já dispensado
-    const isDismissed = localStorage.getItem('cymigo-install-dismissed');
+    const isDismissed = localStorage.getItem('mapm-install-dismissed');
     if (isDismissed) return;
 
     // Detecta iOS (Safari)
@@ -42,7 +42,7 @@ export default function InstallPrompt() {
     const { outcome } = await deferredPrompt.userChoice;
     if (outcome === 'accepted') {
       setShowAndroid(false);
-      localStorage.setItem('cymigo-install-dismissed', '1');
+      localStorage.setItem('mapm-install-dismissed', '1');
     }
     setDeferredPrompt(null);
   };
@@ -51,7 +51,7 @@ export default function InstallPrompt() {
     setShowAndroid(false);
     setShowIOS(false);
     setDismissed(true);
-    localStorage.setItem('cymigo-install-dismissed', '1');
+    localStorage.setItem('mapm-install-dismissed', '1');
   };
 
   if (dismissed) return null;
@@ -61,11 +61,11 @@ export default function InstallPrompt() {
     return (
       <div className="install-banner">
         <div className="install-icon">
-          <img src="/icon.svg" alt="CYMI GO" width={44} height={44} style={{ borderRadius: 10 }} />
+          <img src="/icon.svg" alt="MAPM" width={44} height={44} style={{ borderRadius: 10 }} />
         </div>
         <div className="install-info">
-          <div className="install-title">Instalar CYMI GO</div>
-          <div className="install-sub">Adicione à tela inicial, sem ocupar espaço</div>
+          <div className="install-title">Instalar MAPM</div>
+          <div className="install-sub">Melhor Abastecimento na Palma da Mão</div>
         </div>
         <button className="install-btn" onClick={handleInstall}>Instalar</button>
         <button className="install-close" onClick={dismiss}>✕</button>
@@ -79,8 +79,8 @@ export default function InstallPrompt() {
       <div className="install-ios-overlay" onClick={dismiss}>
         <div className="install-ios-card" onClick={e => e.stopPropagation()}>
           <button className="install-close install-close-abs" onClick={dismiss}>✕</button>
-          <img src="/icon.svg" alt="CYMI GO" width={64} height={64} style={{ borderRadius: 14, margin: '0 auto 12px', display: 'block' }} />
-          <div className="install-ios-title">Instalar CYMI GO</div>
+          <img src="/icon.svg" alt="MAPM" width={64} height={64} style={{ borderRadius: 14, margin: '0 auto 12px', display: 'block' }} />
+          <div className="install-ios-title">Instalar MAPM</div>
           <div className="install-ios-desc">Adicione à tela inicial do seu iPhone para acesso rápido</div>
           <div className="install-ios-steps">
             <div className="ios-step">
