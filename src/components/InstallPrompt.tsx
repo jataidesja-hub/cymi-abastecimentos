@@ -61,7 +61,7 @@ export default function InstallPrompt() {
     return (
       <div className="install-banner">
         <div className="install-icon">
-          <img src="/icon.svg" alt="MAPM" width={44} height={44} style={{ borderRadius: 10 }} />
+          <img src="/api/icon?size=44" alt="MAPM" width={44} height={44} style={{ borderRadius: 10 }} />
         </div>
         <div className="install-info">
           <div className="install-title">Instalar MAPM</div>
@@ -79,7 +79,7 @@ export default function InstallPrompt() {
       <div className="install-ios-overlay" onClick={dismiss}>
         <div className="install-ios-card" onClick={e => e.stopPropagation()}>
           <button className="install-close install-close-abs" onClick={dismiss}>✕</button>
-          <img src="/icon.svg" alt="MAPM" width={64} height={64} style={{ borderRadius: 14, margin: '0 auto 12px', display: 'block' }} />
+          <img src="/api/icon?size=64" alt="MAPM" width={64} height={64} style={{ borderRadius: 14, margin: '0 auto 12px', display: 'block' }} />
           <div className="install-ios-title">Instalar MAPM</div>
           <div className="install-ios-desc">Adicione à tela inicial do seu iPhone para acesso rápido</div>
           <div className="install-ios-steps">
