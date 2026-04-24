@@ -2,97 +2,206 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const maxDuration = 30;
 
-// ─── Slugify para dedurapreco.com ─────────────────────────────────────────────
+// ─── Slugify ──────────────────────────────────────────────────────────────────
 function toSlug(str: string): string {
-  return str
-    .toLowerCase()
-    .normalize('NFD')
+  return str.toLowerCase().normalize('NFD')
     .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9\s-]/g, '')
-    .trim()
+    .replace(/[^a-z0-9\s-]/g, '').trim()
     .replace(/\s+/g, '-');
 }
 
 const UF_TO_STATE_SLUG: Record<string, string> = {
-  ac: 'acre', al: 'alagoas', ap: 'amapa', am: 'amazonas', ba: 'bahia',
-  ce: 'ceara', df: 'distrito-federal', es: 'espirito-santo', go: 'goias',
-  ma: 'maranhao', mt: 'mato-grosso', ms: 'mato-grosso-do-sul',
-  mg: 'minas-gerais', pa: 'para', pb: 'paraiba', pr: 'parana',
-  pe: 'pernambuco', pi: 'piaui', rj: 'rio-de-janeiro',
-  rn: 'rio-grande-do-norte', rs: 'rio-grande-do-sul', ro: 'rondonia',
-  rr: 'roraima', sc: 'santa-catarina', sp: 'sao-paulo', se: 'sergipe',
-  to: 'tocantins',
+  ac:'acre',al:'alagoas',ap:'amapa',am:'amazonas',ba:'bahia',ce:'ceara',
+  df:'distrito-federal',es:'espirito-santo',go:'goias',ma:'maranhao',
+  mt:'mato-grosso',ms:'mato-grosso-do-sul',mg:'minas-gerais',pa:'para',
+  pb:'paraiba',pr:'parana',pe:'pernambuco',pi:'piaui',rj:'rio-de-janeiro',
+  rn:'rio-grande-do-norte',rs:'rio-grande-do-sul',ro:'rondonia',rr:'roraima',
+  sc:'santa-catarina',sp:'sao-paulo',se:'sergipe',to:'tocantins',
 };
 
-// ─── Geocode estado da cidade via Nominatim ───────────────────────────────────
+// ─── ANP regionais (fallback por estado) ─────────────────────────────────────
+const ANP: Record<string, Record<string, number>> = {
+  default: { 'Gasolina Comum':6.29,'Gasolina Aditivada':6.69,'Etanol':4.21,'Diesel S10':6.08,'Diesel S500':5.89,'GNV':4.39 },
+  nordeste: { 'Gasolina Comum':6.35,'Gasolina Aditivada':6.75,'Etanol':4.35,'Diesel S10':6.12,'Diesel S500':5.92,'GNV':4.42 },
+  sudeste:  { 'Gasolina Comum':6.18,'Gasolina Aditivada':6.58,'Etanol':4.05,'Diesel S10':6.01,'Diesel S500':5.82,'GNV':4.31 },
+  sul:      { 'Gasolina Comum':6.22,'Gasolina Aditivada':6.62,'Etanol':4.12,'Diesel S10':6.05,'Diesel S500':5.85,'GNV':4.35 },
+  norte:    { 'Gasolina Comum':6.52,'Gasolina Aditivada':6.92,'Etanol':4.51,'Diesel S10':6.25,'Diesel S500':6.05,'GNV':4.55 },
+  centroeste:{ 'Gasolina Comum':6.31,'Gasolina Aditivada':6.71,'Etanol':4.18,'Diesel S10':6.09,'Diesel S500':5.88,'GNV':4.40 },
+};
+const NORDESTE = ['al','ba','ce','ma','pb','pe','pi','rn','se'];
+const SUDESTE  = ['es','mg','rj','sp'];
+const SUL      = ['pr','rs','sc'];
+const NORTE    = ['ac','am','ap','pa','ro','rr','to'];
+
+function getANP(uf: string): Record<string, number> {
+  if (NORDESTE.includes(uf)) return ANP.nordeste;
+  if (SUDESTE.includes(uf))  return ANP.sudeste;
+  if (SUL.includes(uf))      return ANP.sul;
+  if (NORTE.includes(uf))    return ANP.norte;
+  if (['df','go','ms','mt'].includes(uf)) return ANP.centroeste;
+  return ANP.default;
+}
+
+const ALL_FUELS = ['Gasolina Comum','Gasolina Aditivada','Etanol','Diesel S10','Diesel S500','GNV'];
+
+// ─── Nominatim helpers ────────────────────────────────────────────────────────
 async function getStateUF(cidade: string): Promise<string | null> {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1&addressdetails=1&countrycodes=br`,
-      { headers: { 'User-Agent': 'MAPM-App/1.0' }, signal: AbortSignal.timeout(4000) }
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade+', Brasil')}&format=json&limit=1&addressdetails=1&countrycodes=br`,
+      { headers:{'User-Agent':'MAPM-App/1.0'}, signal:AbortSignal.timeout(4000) }
     );
     const data = await res.json();
-    const state = data[0]?.address?.state;
-    const stateMap: Record<string, string> = {
-      'Acre': 'ac', 'Alagoas': 'al', 'Amapá': 'ap', 'Amazonas': 'am',
-      'Bahia': 'ba', 'Ceará': 'ce', 'Distrito Federal': 'df',
-      'Espírito Santo': 'es', 'Goiás': 'go', 'Maranhão': 'ma',
-      'Mato Grosso': 'mt', 'Mato Grosso do Sul': 'ms', 'Minas Gerais': 'mg',
-      'Pará': 'pa', 'Paraíba': 'pb', 'Paraná': 'pr', 'Pernambuco': 'pe',
-      'Piauí': 'pi', 'Rio de Janeiro': 'rj', 'Rio Grande do Norte': 'rn',
-      'Rio Grande do Sul': 'rs', 'Rondônia': 'ro', 'Roraima': 'rr',
-      'Santa Catarina': 'sc', 'São Paulo': 'sp', 'Sergipe': 'se', 'Tocantins': 'to',
+    const stateMap: Record<string,string> = {
+      'Acre':'ac','Alagoas':'al','Amapá':'ap','Amazonas':'am','Bahia':'ba','Ceará':'ce',
+      'Distrito Federal':'df','Espírito Santo':'es','Goiás':'go','Maranhão':'ma',
+      'Mato Grosso':'mt','Mato Grosso do Sul':'ms','Minas Gerais':'mg','Pará':'pa',
+      'Paraíba':'pb','Paraná':'pr','Pernambuco':'pe','Piauí':'pi','Rio de Janeiro':'rj',
+      'Rio Grande do Norte':'rn','Rio Grande do Sul':'rs','Rondônia':'ro','Roraima':'rr',
+      'Santa Catarina':'sc','São Paulo':'sp','Sergipe':'se','Tocantins':'to',
     };
+    const state = data[0]?.address?.state;
     return state ? (stateMap[state] || null) : null;
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ─── Geocode endereço → lat/lon ───────────────────────────────────────────────
-async function geocodeAddress(endereco: string, cidade: string): Promise<{ lat: number; lon: number } | null> {
+async function geocodeAddress(endereco: string, cidade: string): Promise<{lat:number;lon:number}|null> {
   try {
     const q = encodeURIComponent(`${endereco}, ${cidade}, Brasil`);
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=br`,
-      { headers: { 'User-Agent': 'MAPM-App/1.0' }, signal: AbortSignal.timeout(5000) }
+      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=2&countrycodes=br`,
+      { headers:{'User-Agent':'MAPM-App/1.0'}, signal:AbortSignal.timeout(5000) }
     );
     const data = await res.json();
-    if (!data || data.length === 0) return null;
+    if (!data?.length) return null;
     return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
-  } catch {
-    return null;
-  }
+  } catch { return null; }
 }
 
-// ─── Geocode centro da cidade (fallback de coordenada) ────────────────────────
-async function getCityCenter(cidade: string): Promise<{ lat: number; lon: number }> {
+async function getCityCenter(cidade: string): Promise<{lat:number;lon:number}> {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1&countrycodes=br`,
-      { headers: { 'User-Agent': 'MAPM-App/1.0' }, signal: AbortSignal.timeout(4000) }
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade+', Brasil')}&format=json&limit=1&countrycodes=br`,
+      { headers:{'User-Agent':'MAPM-App/1.0'}, signal:AbortSignal.timeout(4000) }
     );
     const data = await res.json();
     if (data[0]) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
   } catch {}
-  return { lat: -14.24, lon: -51.93 };
+  return { lat:-14.24, lon:-51.93 };
 }
 
-// ─── Scrape dedurapreco.com ───────────────────────────────────────────────────
+// ─── Parse dedurapreco.com ────────────────────────────────────────────────────
 interface DeduraStation {
   nome: string;
   endereco: string;
   bandeira: string;
-  precos: Record<string, number | null>;
+  precos: Record<string, number>; // tipo → preço real
 }
 
-async function scrapeDedura(cidade: string, uf: string): Promise<DeduraStation[]> {
-  const stateSlug = UF_TO_STATE_SLUG[uf.toLowerCase()];
-  if (!stateSlug) return [];
+function parsePrice(text: string): number | null {
+  const m = text.match(/R\$\s*([\d]+[,.][\d]{2,3})/);
+  if (!m) return null;
+  const v = parseFloat(m[1].replace(',','.'));
+  return v > 1 && v < 20 ? v : null;
+}
 
+function parseDeduraHtml(html: string): { stations: DeduraStation[]; bestPrices: Record<string, { preco: number; posto: string }> } {
+  const stations: DeduraStation[] = [];
+  const bestPrices: Record<string, { preco: number; posto: string }> = {};
+
+  // ── "Melhores Preços" section ─────────────────────────────────────────────
+  // Extrair do HTML: Gasolina Comum R$ X,XX | NOME POSTO
+  const fuelLabels: Record<string, string> = {
+    'gasolina comum':    'Gasolina Comum',
+    'gasolina aditivada':'Gasolina Aditivada',
+    'etanol':            'Etanol',
+    'diesel s10':        'Diesel S10',
+    'diesel s500':       'Diesel S500',
+    'diesel':            'Diesel S10',
+    'gnv':               'GNV',
+  };
+
+  // Busca padrão: "COMBUSTIVEL R$ PRECO | POSTO" ou variações no HTML
+  for (const [label, tipo] of Object.entries(fuelLabels)) {
+    const re = new RegExp(`${label}[\\s\\S]{0,80}?R\\$\\s*([\\d,\\.]+)[\\s\\S]{0,60}?([A-ZÀÁÂÃÉÊÍÓÔÕÚÜÇ][A-ZÀ-Ú\\s&.,-]{3,60})`, 'gi');
+    const m = re.exec(html);
+    if (m && !bestPrices[tipo]) {
+      const preco = parseFloat(m[1].replace(',','.'));
+      const posto = m[2].trim().replace(/\s+/g,' ');
+      if (preco > 1 && preco < 20 && posto.length > 2) {
+        bestPrices[tipo] = { preco, posto };
+      }
+    }
+  }
+
+  // ── Cards de posto ────────────────────────────────────────────────────────
+  // Divide o HTML em blocos por h3 (cada posto é um card com h3)
+  const blocks = html.split(/<h3[\s>]/i);
+  for (let i = 1; i < blocks.length; i++) {
+    const block = blocks[i];
+
+    // Nome
+    const nomeM = block.match(/^[^>]*?>?([^<]{3,80})</);
+    if (!nomeM) continue;
+    const nome = nomeM[1].trim().replace(/\s+/g,' ');
+    if (nome.length < 3 || /melhores|preços|postos|busca|filtro/i.test(nome)) continue;
+
+    // Endereço — padrão logradouro brasileiro
+    const endM = block.match(/(?:Rua|Avenida|Av\b|Rod(?:ovia)?\.?|Alameda|Travessa|Praça|Estrada|BR-?\d{2,3}|Rodovia|Largo)[^<]{5,150}/i);
+    const endereco = endM ? endM[0].replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim() : '';
+
+    // Bandeira
+    let bandeira = 'Branco';
+    if (/petrobras|br distribui/i.test(block)) bandeira = 'Petrobras';
+    else if (/ipiranga/i.test(block)) bandeira = 'Ipiranga';
+    else if (/shell|raizen/i.test(block)) bandeira = 'Shell';
+    else if (/\bale\b/i.test(block)) bandeira = 'Ale';
+
+    // Preços reais que aparecem no card
+    const precos: Record<string, number> = {};
+
+    // Gasolina Comum (sempre o primeiro preço)
+    const firstPrice = parsePrice(block);
+    if (firstPrice) precos['Gasolina Comum'] = firstPrice;
+
+    // Outros combustíveis que aparecem no card
+    for (const [label, tipo] of Object.entries(fuelLabels)) {
+      if (tipo === 'Gasolina Comum') continue;
+      const re = new RegExp(`${label}[^R]{0,20}R\\$\\s*([\\d,\\.]+)`, 'i');
+      const m = block.match(re);
+      if (m) {
+        const v = parseFloat(m[1].replace(',','.'));
+        if (v > 1 && v < 20) precos[tipo] = v;
+      }
+    }
+
+    if (nome.length >= 3) {
+      stations.push({ nome, endereco, bandeira, precos });
+    }
+  }
+
+  return { stations: stations.slice(0, 30), bestPrices };
+}
+
+// ─── Handler ─────────────────────────────────────────────────────────────────
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+  const cidade = (searchParams.get('cidade') || '').trim();
+
+  if (!cidade) {
+    return NextResponse.json({ error: 'Informe cidade' }, { status: 400 });
+  }
+
+  const uf = await getStateUF(cidade);
+  if (!uf) {
+    return NextResponse.json({ error: 'Cidade não encontrada no Brasil' }, { status: 404 });
+  }
+
+  const stateSlug = UF_TO_STATE_SLUG[uf];
   const cidadeSlug = toSlug(cidade);
   const url = `https://dedurapreco.com/preco-do-combustivel/${stateSlug}/${cidadeSlug}`;
 
+  let html = '';
   try {
     const res = await fetch(url, {
       headers: {
@@ -102,141 +211,24 @@ async function scrapeDedura(cidade: string, uf: string): Promise<DeduraStation[]
       },
       signal: AbortSignal.timeout(10000),
     });
-
-    if (!res.ok) return [];
-    const html = await res.text();
-
-    // Extrai __NEXT_DATA__ (Next.js SSR data)
-    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
-    if (nextDataMatch) {
-      try {
-        const nextData = JSON.parse(nextDataMatch[1]);
-        const pageProps = nextData?.props?.pageProps;
-
-        // Tenta extrair postos de pageProps
-        const stations = pageProps?.postos || pageProps?.stations || pageProps?.gasStations || pageProps?.data?.postos || pageProps?.data;
-        if (Array.isArray(stations) && stations.length > 0) {
-          return parseNextDataStations(stations);
-        }
-      } catch {}
-    }
-
-    // Fallback: parse HTML com regex
-    return parseHtmlStations(html);
-  } catch {
-    return [];
-  }
-}
-
-function parseNextDataStations(stations: any[]): DeduraStation[] {
-  return stations.map((s: any) => ({
-    nome: s.nome || s.name || s.razaoSocial || s.razao_social || 'Posto',
-    endereco: [s.endereco, s.logradouro, s.address].find(Boolean) || '',
-    bandeira: s.bandeira || s.brand || s.distribuidora || 'Branco',
-    precos: {
-      'Gasolina Comum': s.gasolina_comum || s.gasolinaComum || s.precoGasolina || null,
-      'Gasolina Aditivada': s.gasolina_aditivada || s.gasolinaAditivada || null,
-      'Etanol': s.etanol || s.alcool || null,
-      'Diesel S10': s.diesel_s10 || s.dieselS10 || null,
-      'Diesel S500': s.diesel_s500 || s.dieselS500 || null,
-      'GNV': s.gnv || null,
-    },
-  })).filter(s => s.nome && s.nome !== 'Posto');
-}
-
-function parseHtmlStations(html: string): DeduraStation[] {
-  const stations: DeduraStation[] = [];
-
-  // Padrão para extrair blocos de posto do HTML
-  // Procura por h3 com nome do posto seguido de endereço e preço
-  const stationBlocks = html.split(/<h[23]/i).slice(1);
-
-  for (const block of stationBlocks) {
-    // Nome do posto
-    const nomeMatch = block.match(/^[^>]*>([^<]{3,80})</);
-    if (!nomeMatch) continue;
-    const nome = nomeMatch[1].trim().toUpperCase();
-
-    // Filtra blocos que não são postos
-    if (nome.length < 3 || nome.includes('PREÇO') || nome.includes('POSTOS') ||
-        nome.includes('MELHORES') || nome.includes('CIDADE') && nome.length > 20) continue;
-
-    // Endereço — procura padrão de logradouro brasileiro
-    const endMatch = block.match(/(?:Rua|Avenida|Av\.|R\.|Rodovia|Rod\.|Alameda|Al\.|Travessa|Trav\.|Praça)[^<]{10,120}/i);
-    const endereco = endMatch ? endMatch[0].replace(/\s+/g, ' ').trim() : '';
-
-    // Bandeira
-    let bandeira = 'Branco';
-    if (/petrobras|br\s*distribui/i.test(block)) bandeira = 'Petrobras';
-    else if (/ipiranga/i.test(block)) bandeira = 'Ipiranga';
-    else if (/shell|raizen/i.test(block)) bandeira = 'Shell';
-    else if (/ale\b/i.test(block)) bandeira = 'Ale';
-    else if (/branca|bandeira\s*branca/i.test(block)) bandeira = 'Branco';
-
-    // Preços — padrão R$ X,XX
-    const precoGasolina = extractPrice(block, /gasolina\s*(?:comum)?[^R]*R\$\s*([\d,\.]+)/i) ||
-                          extractPrice(block, /R\$\s*([\d,\.]+)/i);
-    const precoEtanol = extractPrice(block, /etanol[^R]*R\$\s*([\d,\.]+)/i) ||
-                        extractPrice(block, /álcool[^R]*R\$\s*([\d,\.]+)/i);
-    const precoDiesel = extractPrice(block, /diesel[^R]*R\$\s*([\d,\.]+)/i);
-    const precoGasolinaAditivada = extractPrice(block, /aditivada[^R]*R\$\s*([\d,\.]+)/i);
-    const precoGNV = extractPrice(block, /gnv[^R]*R\$\s*([\d,\.]+)/i);
-
-    if (nome.length >= 3) {
-      stations.push({
-        nome,
-        endereco,
-        bandeira,
-        precos: {
-          'Gasolina Comum': precoGasolina,
-          'Gasolina Aditivada': precoGasolinaAditivada,
-          'Etanol': precoEtanol,
-          'Diesel S10': precoDiesel,
-          'Diesel S500': null,
-          'GNV': precoGNV,
-        },
-      });
-    }
+    if (!res.ok) return NextResponse.json({ error: `dedurapreco retornou ${res.status}` }, { status: 404 });
+    html = await res.text();
+  } catch (e: any) {
+    return NextResponse.json({ error: e.message }, { status: 502 });
   }
 
-  return stations.filter(s => s.nome.length > 2).slice(0, 30);
-}
-
-function extractPrice(text: string, pattern: RegExp): number | null {
-  const match = text.match(pattern);
-  if (!match) return null;
-  const raw = match[1].replace(',', '.');
-  const val = parseFloat(raw);
-  return val > 0 && val < 20 ? val : null;
-}
-
-// ─── Handler ─────────────────────────────────────────────────────────────────
-export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const cidade = (searchParams.get('cidade') || '').trim();
-  const latParam = searchParams.get('lat');
-  const lonParam = searchParams.get('lon');
-
-  if (!cidade && (!latParam || !lonParam)) {
-    return NextResponse.json({ error: 'Informe cidade ou localização' }, { status: 400 });
-  }
-
-  // Detecta UF da cidade
-  const uf = await getStateUF(cidade);
-  if (!uf) {
-    return NextResponse.json({ error: 'Cidade não encontrada no Brasil' }, { status: 404 });
-  }
-
-  // Scrape dedurapreco.com
-  const stations = await scrapeDedura(cidade, uf);
+  const { stations, bestPrices } = parseDeduraHtml(html);
 
   if (stations.length === 0) {
-    return NextResponse.json({ error: 'Nenhum posto encontrado no dedurapreco.com para essa cidade' }, { status: 404 });
+    return NextResponse.json({ error: 'Nenhum posto encontrado no dedurapreco.com' }, { status: 404 });
   }
 
-  // Geocodifica endereços em paralelo (lotes de 4 para não sobrecarregar Nominatim)
+  // Preços regionais ANP para completar o que não veio do dedura
+  const anpPrices = getANP(uf);
+
   const cityCenter = await getCityCenter(cidade);
 
+  // Geocodifica em lotes de 4
   const results: any[] = [];
   const BATCH = 4;
 
@@ -244,61 +236,74 @@ export async function GET(request: NextRequest) {
     const batch = stations.slice(i, i + BATCH);
     const geocoded = await Promise.all(
       batch.map(async (posto, idx) => {
+        // Coordenadas
         let coords = { ...cityCenter };
-        if (posto.endereco && posto.endereco.length > 5) {
+        if (posto.endereco.length > 5) {
           const geo = await geocodeAddress(posto.endereco, cidade);
           if (geo) coords = geo;
-          else {
-            // Pequeno jitter para não empilhar no centro
-            coords.lat += (Math.random() - 0.5) * 0.008;
-            coords.lon += (Math.random() - 0.5) * 0.008;
-          }
+          else { coords.lat += (Math.random()-0.5)*0.01; coords.lon += (Math.random()-0.5)*0.01; }
         } else {
-          coords.lat += (Math.random() - 0.5) * 0.008;
-          coords.lon += (Math.random() - 0.5) * 0.008;
+          coords.lat += (Math.random()-0.5)*0.01; coords.lon += (Math.random()-0.5)*0.01;
         }
 
-        const stationId = `dedura-${i + idx}`;
+        const stationId = `dedura-${i+idx}`;
+        const nomePosto = posto.nome;
+
         const stationInfo = {
-          id: stationId,
-          osm_id: null,
-          nome: posto.nome,
-          bandeira: posto.bandeira,
+          id: stationId, osm_id: null,
+          nome: nomePosto, bandeira: posto.bandeira,
           endereco: posto.endereco || cidade,
-          cidade,
-          estado: uf.toUpperCase(),
-          latitude: coords.lat,
-          longitude: coords.lon,
+          cidade, estado: uf.toUpperCase(),
+          latitude: coords.lat, longitude: coords.lon,
           ticket_log: false,
         };
 
         const entries: any[] = [];
-        let temPreco = false;
 
-        for (const [tipo, preco] of Object.entries(posto.precos)) {
-          if (preco && typeof preco === 'number' && preco > 0) {
-            temPreco = true;
+        for (const tipo of ALL_FUELS) {
+          let preco: number | null = null;
+          let fonte = 'dedurapreco.com';
+
+          // 1. Preço real do card do posto
+          if (posto.precos[tipo]) {
+            preco = posto.precos[tipo];
+          }
+          // 2. Preço do "Melhores Preços" se este posto é o mencionado
+          else if (bestPrices[tipo]) {
+            const bp = bestPrices[tipo];
+            const nomeNorm = nomePosto.toLowerCase().replace(/\s+/g,'');
+            const bpNorm = bp.posto.toLowerCase().replace(/\s+/g,'');
+            if (nomeNorm.includes(bpNorm.slice(0,8)) || bpNorm.includes(nomeNorm.slice(0,8))) {
+              preco = bp.preco;
+            }
+          }
+          // 3. Estimativa regional ANP
+          if (!preco && anpPrices[tipo]) {
+            preco = anpPrices[tipo];
+            fonte = 'estimativa regional';
+          }
+
+          if (preco && preco > 0) {
             entries.push({
               id: `${stationId}-${tipo}`,
               tipo_combustivel: tipo,
               preco,
               data_atualizacao: new Date().toISOString(),
-              reportado_por: 'dedurapreco.com',
+              reportado_por: fonte,
               ticket_log: 'Não',
               stations: stationInfo,
             });
           }
         }
 
-        if (!temPreco) {
+        // Se não tem nenhum preço
+        if (entries.length === 0) {
           entries.push({
             id: `sem-preco-${stationId}`,
-            tipo_combustivel: 'sem_preco',
-            preco: 0,
+            tipo_combustivel: 'sem_preco', preco: 0,
             data_atualizacao: new Date().toISOString(),
             reportado_por: 'dedurapreco.com',
-            ticket_log: 'Não',
-            stations: stationInfo,
+            ticket_log: 'Não', stations: stationInfo,
           });
         }
 
@@ -312,7 +317,6 @@ export async function GET(request: NextRequest) {
     data: results,
     source: 'dedurapreco.com',
     total_osm: stations.length,
-    osm_unavailable: false,
     cidade,
   });
 }
