@@ -7,9 +7,6 @@ function getCacheKey(cidade: string) { return `mapm-v1-${cidade.toLowerCase().tr
 function saveCache(cidade: string, data: FuelPriceItem[], source: string) {
   try { sessionStorage.setItem(getCacheKey(cidade), JSON.stringify({ data, source, ts: Date.now() })); } catch {}
 }
-function clearCache(cidade: string) {
-  try { sessionStorage.removeItem(getCacheKey(cidade)); } catch {}
-}
 function loadCache(cidade: string): { data: FuelPriceItem[]; source: string } | null {
   try {
     const raw = sessionStorage.getItem(getCacheKey(cidade));
@@ -98,9 +95,6 @@ export default function Home() {
   const [ticketLogOnly, setTicketLogOnly] = useState(false); // eslint-disable-line
   const [prices, setPrices] = useState<FuelPriceItem[]>([]);
   const allPricesRef = useRef<FuelPriceItem[]>([]);
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const autocompleteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(false);
   const [gpsLoading, setGpsLoading] = useState(false);
   const [searched, setSearched] = useState(false);
@@ -125,59 +119,6 @@ export default function Home() {
     setToast(msg);
     setToastType(type);
     setTimeout(() => setToast(''), 3500);
-  };
-
-  const fetchCitySuggestions = useCallback(async (query: string) => {
-    if (query.length < 2) { setCitySuggestions([]); setShowSuggestions(false); return; }
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', Brasil')}&format=json&limit=6&addressdetails=1&featuretype=city`,
-        { headers: { 'User-Agent': 'MAPM-App/1.0' } }
-      );
-      const data = await res.json();
-      const names: string[] = [];
-      const seen = new Set<string>();
-      for (const item of data) {
-        const city =
-          item.address?.city ||
-          item.address?.town ||
-          item.address?.municipality ||
-          item.address?.village ||
-          item.name;
-        const state = item.address?.state || '';
-        if (city && !seen.has(city)) {
-          seen.add(city);
-          names.push(state ? `${city}, ${state}` : city);
-        }
-      }
-      setCitySuggestions(names);
-      setShowSuggestions(names.length > 0);
-    } catch {
-      setCitySuggestions([]);
-    }
-  }, []);
-
-  const handleCidadeChange = (value: string) => {
-    setCidade(value);
-    if (autocompleteTimer.current) clearTimeout(autocompleteTimer.current);
-    autocompleteTimer.current = setTimeout(() => fetchCitySuggestions(value), 300);
-  };
-
-  const selectSuggestion = (suggestion: string) => {
-    const cityOnly = suggestion.split(',')[0].trim();
-    setCidade(cityOnly);
-    setCitySuggestions([]);
-    setShowSuggestions(false);
-    allPricesRef.current = [];
-    fetchPrices(cityOnly, activeFuel);
-  };
-
-  const openNavigation = (station: Station) => {
-    const { latitude, longitude, nome, endereco } = station;
-    if (!latitude || !longitude) return;
-    const label = encodeURIComponent(`${nome} — ${endereco}`);
-    const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&destination_place_id=${label}&travelmode=driving`;
-    window.open(url, '_blank');
   };
 
   const applyFilter = (all: FuelPriceItem[], tipo: string) => {
@@ -213,84 +154,30 @@ export default function Home() {
           params.append('lon', String(coords.lng));
         }
 
-        // Fonte primária: dedurapreco.com (postos + preços reais)
-        const deduraRes = await fetch(`/api/claude-stations?${params}`);
-        const deduraJson = await deduraRes.json();
-        if (!deduraJson.error && deduraJson.data && deduraJson.data.length > 0) {
-          const data: FuelPriceItem[] = deduraJson.data;
+        // Claude AI como fonte primária
+        const res = await fetch(`/api/claude-stations?${params}`);
+        const json = await res.json();
+
+        if (!json.error && json.data && json.data.length > 0) {
+          const data: FuelPriceItem[] = json.data;
           allPricesRef.current = data;
-          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, 'dedurapreco.com');
+          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, json.source || 'Claude AI');
           setPrices(applyFilter(data, tipo || 'Todos'));
-          setSource('dedurapreco.com');
+          setSource(json.source || 'Claude AI');
           return;
         }
 
-        // Fallback: OpenStreetMap (postos reais sem preço)
-        const osmRes = await fetch(`/api/stations?${params}`);
-        const osmJson = await osmRes.json();
-        const osmData: FuelPriceItem[] = osmJson.data || [];
+        // Fallback: /api/stations (OSM + Supabase)
+        setWebPricesLoading(true);
+        const fallbackRes = await fetch(`/api/stations?${params}`);
+        const fallbackJson = await fallbackRes.json();
+        const fallbackData: FuelPriceItem[] = fallbackJson.data || [];
+        allPricesRef.current = fallbackData;
+        if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), fallbackData, fallbackJson.source || 'OpenStreetMap');
+        setPrices(applyFilter(fallbackData, tipo || 'Todos'));
+        setSource(fallbackJson.source || 'OpenStreetMap');
+        setWebPricesLoading(false);
 
-        if (osmData.length > 0) {
-          // Postos reais encontrados — busca preços regionais em paralelo
-          setWebPricesLoading(true);
-          const webPricesRes = await fetch(`/api/web-prices?${params}`).catch(() => null);
-          const webPrices = webPricesRes ? await webPricesRes.json().catch(() => null) : null;
-
-          // Converte resposta do web-prices { prices: {...} } para FuelPriceItem[]
-          const FUEL_KEY_MAP: Record<string, string> = {
-            gasolina_comum: 'Gasolina Comum', gasolina_aditivada: 'Gasolina Aditivada',
-            etanol: 'Etanol', diesel_s10: 'Diesel S10', diesel_s500: 'Diesel S500', gnv: 'GNV',
-          };
-          const regionalPrices: { tipo: string; preco: number }[] = [];
-          if (webPrices?.prices) {
-            for (const [key, tipo] of Object.entries(FUEL_KEY_MAP)) {
-              const preco = webPrices.prices[key];
-              if (preco && typeof preco === 'number' && preco > 0) {
-                regionalPrices.push({ tipo, preco });
-              }
-            }
-          }
-
-          // Aplica preços regionais nos postos sem preço
-          let finalData = osmData;
-          if (regionalPrices.length > 0) {
-            const withPrice = new Set(
-              osmData.filter(d => d.preco > 0 && d.tipo_combustivel !== 'sem_preco').map(d => d.stations.id)
-            );
-            const semPreco = osmData.filter(d => d.tipo_combustivel === 'sem_preco' && !withPrice.has(d.stations.id));
-
-            const extras: FuelPriceItem[] = [];
-            semPreco.forEach(sp => {
-              regionalPrices.forEach(rp => {
-                extras.push({
-                  id: `${sp.stations.id}-${rp.tipo}`,
-                  tipo_combustivel: rp.tipo,
-                  preco: rp.preco,
-                  data_atualizacao: new Date().toISOString(),
-                  reportado_por: 'estimativa regional',
-                  stations: sp.stations,
-                });
-              });
-            });
-
-            if (extras.length > 0) {
-              const semPrecoIds = new Set(semPreco.map(d => d.stations.id));
-              finalData = [
-                ...osmData.filter(d => !semPrecoIds.has(d.stations.id)),
-                ...extras,
-              ];
-            }
-          }
-
-          allPricesRef.current = finalData;
-          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), finalData, 'OpenStreetMap');
-          setPrices(applyFilter(finalData, tipo || 'Todos'));
-          setSource('OpenStreetMap');
-          setWebPricesLoading(false);
-          return;
-        }
-
-        showToast('Nenhum posto encontrado nessa cidade no OpenStreetMap', 'error');
       } catch {
         showToast('Erro ao buscar dados', 'error');
       } finally {
@@ -305,7 +192,6 @@ export default function Home() {
   const handleSearch = () => {
     if (cidade.trim()) {
       allPricesRef.current = [];
-      clearCache(cidade.trim());
       fetchPrices(cidade, activeFuel);
     }
   };
@@ -337,11 +223,7 @@ export default function Home() {
             data.address?.town ||
             data.address?.municipality ||
             '';
-          if (city) {
-            setCidade(city);
-            clearCache(city.trim());
-          }
-          allPricesRef.current = [];
+          if (city) setCidade(city);
           fetchPrices(city, activeFuel, coords);
         } catch {
           fetchPrices('', activeFuel, coords);
@@ -469,11 +351,8 @@ export default function Home() {
   );
 
   const stats = useMemo(() => {
-    // Para o ratio etanol/gasolina usa TODOS os dados (não o filtrado)
-    // assim o banner aparece mesmo filtrando por um tipo específico
-    const allReal = allPricesRef.current.filter(p => p.preco > 0 && p.tipo_combustivel !== 'sem_preco');
-    const etanolList = allReal.filter(p => p.tipo_combustivel === 'Etanol').map(p => p.preco);
-    const gasolinaList = allReal.filter(p => p.tipo_combustivel === 'Gasolina Comum').map(p => p.preco);
+    const etanolList = realPrices.filter(p => p.tipo_combustivel === 'Etanol').map(p => p.preco);
+    const gasolinaList = realPrices.filter(p => p.tipo_combustivel === 'Gasolina Comum').map(p => p.preco);
     const avgEtanol = etanolList.length ? etanolList.reduce((a, b) => a + b, 0) / etanolList.length : 0;
     const avgGasolina = gasolinaList.length ? gasolinaList.reduce((a, b) => a + b, 0) / gasolinaList.length : 0;
     const ratio = avgEtanol > 0 && avgGasolina > 0 ? (avgEtanol / avgGasolina) * 100 : 0;
@@ -484,6 +363,9 @@ export default function Home() {
       semPreco: groupedStations.filter(g => g.prices.length === 0).length,
       menorPreco: realPrices.length > 0 ? Math.min(...realPrices.map(p => p.preco)) : 0,
       maiorPreco: realPrices.length > 0 ? Math.max(...realPrices.map(p => p.preco)) : 0,
+      menorTipo: realPrices.length > 0
+        ? realPrices.reduce((a, b) => (a.preco < b.preco ? a : b)).tipo_combustivel
+        : '',
       avgEtanol,
       avgGasolina,
       ratio: Math.round(ratio),
@@ -521,18 +403,13 @@ export default function Home() {
             <span className="ai-dot"></span> IA Expert
           </button>
         </div>
-        <div className="location-bar" style={{ position: 'relative' }}>
+        <div className="location-bar">
           <input
             className="location-input"
             placeholder="Digite a cidade..."
             value={cidade}
-            onChange={e => handleCidadeChange(e.target.value)}
-            onKeyDown={e => {
-              if (e.key === 'Enter') { setShowSuggestions(false); handleSearch(); }
-              if (e.key === 'Escape') setShowSuggestions(false);
-            }}
-            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
-            autoComplete="off"
+            onChange={e => setCidade(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && handleSearch()}
           />
           <button
             className={`gps-btn ${gpsLoading ? 'loading' : ''}`}
@@ -541,15 +418,6 @@ export default function Home() {
           >
             🎯
           </button>
-          {showSuggestions && citySuggestions.length > 0 && (
-            <ul className="city-suggestions">
-              {citySuggestions.map((s, i) => (
-                <li key={i} className="city-suggestion-item" onMouseDown={() => selectSuggestion(s)}>
-                  📍 {s}
-                </li>
-              ))}
-            </ul>
-          )}
         </div>
       </header>
 
@@ -726,7 +594,7 @@ export default function Home() {
 
             {groupedStations.map((g, i) => {
               const hasPrices = g.prices.length > 0;
-              const isWeb = g.prices.some(p => p.fonte === 'estimativa regional' || p.fonte === 'pesquisa web');
+              const isWeb = g.prices.some(p => p.fonte === 'pesquisa web');
               const isTicketLog =
                 g.station.ticket_log ||
                 prices.find(p => p.stations.id === g.station.id)?.ticket_log === 'Sim';
@@ -796,30 +664,20 @@ export default function Home() {
                         <span className="card-footer-time">
                           {isWeb ? '🌐 via pesquisa web' : `🕐 ${timeAgo(g.prices[0].data)}`}
                         </span>
-                        <div className="card-footer-actions">
-                          <button
-                            className="card-action-btn nav-btn"
-                            onClick={() => openNavigation(g.station)}
-                            title="Abrir no mapa"
-                          >
-                            🗺️ Ir
-                          </button>
-                          <button
-                            className={`card-action-btn ${isWeb ? 'confirm' : ''}`}
-                            onClick={() => openReport(g.station)}
-                          >
-                            {isWeb ? '✓ Confirmar' : '✏️ Atualizar'}
-                          </button>
-                        </div>
+                        <button
+                          className={`card-action-btn ${isWeb ? 'confirm' : ''}`}
+                          onClick={() => openReport(g.station)}
+                        >
+                          {isWeb ? '✓ Confirmar' : '✏️ Atualizar'}
+                        </button>
                       </div>
                     </>
                   ) : (
                     <div className="no-price-row">
                       <span className="text-xs text-gray-500">Sem preço cadastrado</span>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button className="card-action-btn nav-btn" onClick={() => openNavigation(g.station)}>🗺️ Ir</button>
-                        <button className="add-price-btn" onClick={() => openReport(g.station)}>+ Adicionar</button>
-                      </div>
+                      <button className="add-price-btn" onClick={() => openReport(g.station)}>
+                        + Adicionar
+                      </button>
                     </div>
                   )}
                 </div>
