@@ -170,16 +170,11 @@ export default function Home() {
   };
 
   const openNavigation = (station: Station) => {
-    const { latitude, longitude, nome, endereco, cidade } = station;
-    // Se é posto real do OSM (tem coordenadas verificadas), navega por coordenada
-    const isRealLocation = station.id.startsWith('osm-') && latitude && longitude;
-    if (isRealLocation) {
-      window.open(`https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`, '_blank');
-    } else {
-      // Posto sem localização exata — busca pelo nome no Google Maps
-      const query = encodeURIComponent(`${nome} posto combustível ${endereco} ${cidade}`);
-      window.open(`https://www.google.com/maps/search/?api=1&query=${query}`, '_blank');
-    }
+    const { latitude, longitude, nome, endereco } = station;
+    if (!latitude || !longitude) return;
+    const label = encodeURIComponent(`${nome} — ${endereco}`);
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}&destination_place_id=${label}&travelmode=driving`;
+    window.open(url, '_blank');
   };
 
   const applyFilter = (all: FuelPriceItem[], tipo: string) => {
@@ -215,152 +210,28 @@ export default function Home() {
           params.append('lon', String(coords.lng));
         }
 
-        // ── Camada 1: Claude AI (fonte primária) ──────────────────────────────
-        let claudeOk = false;
-        try {
-          const res = await fetch(`/api/claude-stations?${params}`);
-          const json = await res.json();
+        // Claude AI como fonte primária
+        const res = await fetch(`/api/claude-stations?${params}`);
+        const json = await res.json();
 
-          if (!json.error && json.data && json.data.length > 0) {
-            const data: FuelPriceItem[] = json.data;
-            allPricesRef.current = data;
-            if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, json.source || 'Claude AI');
-            setPrices(applyFilter(data, tipo || 'Todos'));
-            setSource(json.source || 'Claude AI');
-            claudeOk = true;
-          }
-        } catch (e) {
-          console.warn('[fetchPrices] Claude falhou:', e);
+        if (!json.error && json.data && json.data.length > 0) {
+          const data: FuelPriceItem[] = json.data;
+          allPricesRef.current = data;
+          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, json.source || 'Claude AI');
+          setPrices(applyFilter(data, tipo || 'Todos'));
+          setSource(json.source || 'Claude AI');
+          return;
         }
 
-        if (claudeOk) return;
-
-        // ── Camada 2: OSM + Supabase (paralelo com web-prices) ────────────────
+        // Fallback: /api/stations (OSM + Supabase)
         setWebPricesLoading(true);
-        const [osmResult, webResult] = await Promise.allSettled([
-          fetch(`/api/stations?${params}`).then(r => r.json()),
-          cidadeBusca.trim()
-            ? fetch(`/api/web-prices?cidade=${encodeURIComponent(cidadeBusca.trim())}`).then(r => r.json())
-            : Promise.resolve(null),
-        ]);
-
-        const osmData: FuelPriceItem[] =
-          osmResult.status === 'fulfilled' && osmResult.value?.data ? osmResult.value.data : [];
-        const webPrices =
-          webResult.status === 'fulfilled' && webResult.value?.prices ? webResult.value : null;
-
-        // Se OSM retornou postos sem preço e temos web-prices, enriquece
-        if (osmData.length > 0 && webPrices) {
-          const FUEL_MAP: Record<string, string> = {
-            gasolina_comum: 'Gasolina Comum',
-            gasolina_aditivada: 'Gasolina Aditivada',
-            etanol: 'Etanol',
-            diesel_s10: 'Diesel S10',
-            diesel_s500: 'Diesel S500',
-            gnv: 'GNV',
-          };
-
-          const enriched: FuelPriceItem[] = [];
-          const seenStations = new Set<string>();
-
-          for (const item of osmData) {
-            if (item.tipo_combustivel === 'sem_preco' && !seenStations.has(item.stations.id)) {
-              seenStations.add(item.stations.id);
-              // Adiciona preços da web a este posto
-              let addedAny = false;
-              for (const [key, tipo] of Object.entries(FUEL_MAP)) {
-                const preco = webPrices.prices[key];
-                if (preco && typeof preco === 'number' && preco > 0) {
-                  addedAny = true;
-                  enriched.push({
-                    id: `web-${item.stations.id}-${key}`,
-                    tipo_combustivel: tipo,
-                    preco,
-                    data_atualizacao: new Date().toISOString(),
-                    reportado_por: 'pesquisa web',
-                    ticket_log: item.ticket_log,
-                    stations: item.stations,
-                  });
-                }
-              }
-              if (!addedAny) enriched.push(item);
-            } else {
-              enriched.push(item);
-            }
-          }
-
-          allPricesRef.current = enriched;
-          const srcLabel = `OpenStreetMap + ${webPrices.fonte || 'Web'}`;
-          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), enriched, srcLabel);
-          setPrices(applyFilter(enriched, tipo || 'Todos'));
-          setSource(srcLabel);
-          setWebPricesLoading(false);
-          return;
-        }
-
-        // Se OSM retornou postos (mesmo sem preço)
-        if (osmData.length > 0) {
-          allPricesRef.current = osmData;
-          const srcLabel = osmResult.status === 'fulfilled' ? (osmResult.value.source || 'OpenStreetMap') : 'OpenStreetMap';
-          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), osmData, srcLabel);
-          setPrices(applyFilter(osmData, tipo || 'Todos'));
-          setSource(srcLabel);
-          setWebPricesLoading(false);
-          return;
-        }
-
-        // ── Camada 3: Web-prices puro (ANP regional) ──────────────────────────
-        if (webPrices && cidadeBusca.trim()) {
-          const FUEL_MAP: Record<string, string> = {
-            gasolina_comum: 'Gasolina Comum',
-            gasolina_aditivada: 'Gasolina Aditivada',
-            etanol: 'Etanol',
-            diesel_s10: 'Diesel S10',
-            diesel_s500: 'Diesel S500',
-            gnv: 'GNV',
-          };
-
-          const stationId = `web-generic-${Date.now()}`;
-          const station = {
-            id: stationId,
-            osm_id: 0,
-            nome: `Postos em ${cidadeBusca.trim()}`,
-            bandeira: 'Branco',
-            endereco: `Região de ${cidadeBusca.trim()}`,
-            cidade: cidadeBusca.trim(),
-            estado: '',
-            latitude: -9.39,
-            longitude: -40.50,
-            ticket_log: false,
-          };
-
-          const entries: FuelPriceItem[] = [];
-          for (const [key, tipo] of Object.entries(FUEL_MAP)) {
-            const preco = webPrices.prices[key];
-            if (preco && typeof preco === 'number' && preco > 0) {
-              entries.push({
-                id: `${stationId}-${key}`,
-                tipo_combustivel: tipo,
-                preco,
-                data_atualizacao: new Date().toISOString(),
-                reportado_por: 'pesquisa web',
-                ticket_log: undefined,
-                stations: station,
-              });
-            }
-          }
-
-          if (entries.length > 0) {
-            allPricesRef.current = entries;
-            const srcLabel = webPrices.fonte || 'Média Regional ANP';
-            saveCache(cidadeBusca.trim(), entries, srcLabel);
-            setPrices(applyFilter(entries, tipo || 'Todos'));
-            setSource(srcLabel);
-            setWebPricesLoading(false);
-            return;
-          }
-        }
-
+        const fallbackRes = await fetch(`/api/stations?${params}`);
+        const fallbackJson = await fallbackRes.json();
+        const fallbackData: FuelPriceItem[] = fallbackJson.data || [];
+        allPricesRef.current = fallbackData;
+        if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), fallbackData, fallbackJson.source || 'OpenStreetMap');
+        setPrices(applyFilter(fallbackData, tipo || 'Todos'));
+        setSource(fallbackJson.source || 'OpenStreetMap');
         setWebPricesLoading(false);
 
       } catch {
