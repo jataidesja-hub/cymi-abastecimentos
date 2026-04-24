@@ -1,89 +1,213 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Anthropic from '@anthropic-ai/sdk';
 
-export const maxDuration = 60;
+export const maxDuration = 30;
 
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-// ─── Distância em km entre dois pontos (Haversine) ───────────────────────────
-function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
-  const R = 6371;
-  const dLat = (lat2 - lat1) * Math.PI / 180;
-  const dLon = (lon2 - lon1) * Math.PI / 180;
-  const a = Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
-    Math.sin(dLon / 2) ** 2;
-  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+// ─── Slugify para dedurapreco.com ─────────────────────────────────────────────
+function toSlug(str: string): string {
+  return str
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9\s-]/g, '')
+    .trim()
+    .replace(/\s+/g, '-');
 }
 
-// ─── Normaliza nome da cidade (remove UF, ex: "Curaça BA" -> "Curaçá") ────────
-function normalizeCityName(input: string): string {
-  let city = input.trim();
-  const ufPattern = /[\s,\-]+(?:AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)$/i;
-  const cleanCity = city.replace(ufPattern, '').trim();
+const UF_TO_STATE_SLUG: Record<string, string> = {
+  ac: 'acre', al: 'alagoas', ap: 'amapa', am: 'amazonas', ba: 'bahia',
+  ce: 'ceara', df: 'distrito-federal', es: 'espirito-santo', go: 'goias',
+  ma: 'maranhao', mt: 'mato-grosso', ms: 'mato-grosso-do-sul',
+  mg: 'minas-gerais', pa: 'para', pb: 'paraiba', pr: 'parana',
+  pe: 'pernambuco', pi: 'piaui', rj: 'rio-de-janeiro',
+  rn: 'rio-grande-do-norte', rs: 'rio-grande-do-sul', ro: 'rondonia',
+  rr: 'roraima', sc: 'santa-catarina', sp: 'sao-paulo', se: 'sergipe',
+  to: 'tocantins',
+};
 
-  const corrections: Record<string, string> = {
-    'curaca': 'Curaçá',
-    'curaça': 'Curaçá',
-    'paulo afonso': 'Paulo Afonso',
-    'juazeiro': 'Juazeiro',
-  };
-
-  const key = cleanCity.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  if (corrections[key]) return corrections[key];
-
-  return cleanCity || city;
-}
-
-// ─── Geocode centro da cidade ─────────────────────────────────────────────────
-async function getCityCenter(cidade: string): Promise<{ lat: number; lon: number; name: string }> {
-  const cleanName = normalizeCityName(cidade);
-  const queries = [cidade, cleanName];
-
-  for (const q of queries) {
-    try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q + ', Brasil')}&format=json&limit=1&countrycodes=br`,
-        { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
-      );
-      const data = await res.json();
-      if (data[0]) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon), name: cleanName };
-    } catch {}
-  }
-  // Fallback genérico para o Brasil se tudo falhar (não Petrolina)
-  return { lat: -14.24, lon: -51.93, name: cleanName };
-}
-
-// ─── Geocode endereço → lat/lon via Nominatim com validação de distância ──────
-async function geocodeAddress(address: string, cidadeName: string, cityCenter: { lat: number; lon: number }): Promise<{ lat: number; lon: number } | null> {
+// ─── Geocode estado da cidade via Nominatim ───────────────────────────────────
+async function getStateUF(cidade: string): Promise<string | null> {
   try {
-    const q = encodeURIComponent(`${address}, ${cidadeName}, Brasil`);
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=br`,
-      { headers: { 'User-Agent': 'CombustivelApp/1.0' }, signal: AbortSignal.timeout(4000) }
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1&addressdetails=1&countrycodes=br`,
+      { headers: { 'User-Agent': 'MAPM-App/1.0' }, signal: AbortSignal.timeout(4000) }
     );
-    if (!res.ok) return null;
     const data = await res.json();
-    if (!data || data.length === 0) return null;
-
-    let best: { lat: number; lon: number } | null = null;
-    let bestDist = Infinity;
-
-    for (const item of data) {
-      const lat = parseFloat(item.lat);
-      const lon = parseFloat(item.lon);
-      const dist = haversineKm(cityCenter.lat, cityCenter.lon, lat, lon);
-      // O endereço geocodificado não pode estar a mais de 25km do centro da cidade
-      if (dist < bestDist && dist < 25) {
-        bestDist = dist;
-        best = { lat, lon };
-      }
-    }
-
-    return best;
+    const state = data[0]?.address?.state;
+    const stateMap: Record<string, string> = {
+      'Acre': 'ac', 'Alagoas': 'al', 'Amapá': 'ap', 'Amazonas': 'am',
+      'Bahia': 'ba', 'Ceará': 'ce', 'Distrito Federal': 'df',
+      'Espírito Santo': 'es', 'Goiás': 'go', 'Maranhão': 'ma',
+      'Mato Grosso': 'mt', 'Mato Grosso do Sul': 'ms', 'Minas Gerais': 'mg',
+      'Pará': 'pa', 'Paraíba': 'pb', 'Paraná': 'pr', 'Pernambuco': 'pe',
+      'Piauí': 'pi', 'Rio de Janeiro': 'rj', 'Rio Grande do Norte': 'rn',
+      'Rio Grande do Sul': 'rs', 'Rondônia': 'ro', 'Roraima': 'rr',
+      'Santa Catarina': 'sc', 'São Paulo': 'sp', 'Sergipe': 'se', 'Tocantins': 'to',
+    };
+    return state ? (stateMap[state] || null) : null;
   } catch {
     return null;
   }
+}
+
+// ─── Geocode endereço → lat/lon ───────────────────────────────────────────────
+async function geocodeAddress(endereco: string, cidade: string): Promise<{ lat: number; lon: number } | null> {
+  try {
+    const q = encodeURIComponent(`${endereco}, ${cidade}, Brasil`);
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=3&countrycodes=br`,
+      { headers: { 'User-Agent': 'MAPM-App/1.0' }, signal: AbortSignal.timeout(5000) }
+    );
+    const data = await res.json();
+    if (!data || data.length === 0) return null;
+    return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  } catch {
+    return null;
+  }
+}
+
+// ─── Geocode centro da cidade (fallback de coordenada) ────────────────────────
+async function getCityCenter(cidade: string): Promise<{ lat: number; lon: number }> {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade + ', Brasil')}&format=json&limit=1&countrycodes=br`,
+      { headers: { 'User-Agent': 'MAPM-App/1.0' }, signal: AbortSignal.timeout(4000) }
+    );
+    const data = await res.json();
+    if (data[0]) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) };
+  } catch {}
+  return { lat: -14.24, lon: -51.93 };
+}
+
+// ─── Scrape dedurapreco.com ───────────────────────────────────────────────────
+interface DeduraStation {
+  nome: string;
+  endereco: string;
+  bandeira: string;
+  precos: Record<string, number | null>;
+}
+
+async function scrapeDedura(cidade: string, uf: string): Promise<DeduraStation[]> {
+  const stateSlug = UF_TO_STATE_SLUG[uf.toLowerCase()];
+  if (!stateSlug) return [];
+
+  const cidadeSlug = toSlug(cidade);
+  const url = `https://dedurapreco.com/preco-do-combustivel/${stateSlug}/${cidadeSlug}`;
+
+  try {
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9',
+      },
+      signal: AbortSignal.timeout(10000),
+    });
+
+    if (!res.ok) return [];
+    const html = await res.text();
+
+    // Extrai __NEXT_DATA__ (Next.js SSR data)
+    const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([\s\S]*?)<\/script>/);
+    if (nextDataMatch) {
+      try {
+        const nextData = JSON.parse(nextDataMatch[1]);
+        const pageProps = nextData?.props?.pageProps;
+
+        // Tenta extrair postos de pageProps
+        const stations = pageProps?.postos || pageProps?.stations || pageProps?.gasStations || pageProps?.data?.postos || pageProps?.data;
+        if (Array.isArray(stations) && stations.length > 0) {
+          return parseNextDataStations(stations);
+        }
+      } catch {}
+    }
+
+    // Fallback: parse HTML com regex
+    return parseHtmlStations(html);
+  } catch {
+    return [];
+  }
+}
+
+function parseNextDataStations(stations: any[]): DeduraStation[] {
+  return stations.map((s: any) => ({
+    nome: s.nome || s.name || s.razaoSocial || s.razao_social || 'Posto',
+    endereco: [s.endereco, s.logradouro, s.address].find(Boolean) || '',
+    bandeira: s.bandeira || s.brand || s.distribuidora || 'Branco',
+    precos: {
+      'Gasolina Comum': s.gasolina_comum || s.gasolinaComum || s.precoGasolina || null,
+      'Gasolina Aditivada': s.gasolina_aditivada || s.gasolinaAditivada || null,
+      'Etanol': s.etanol || s.alcool || null,
+      'Diesel S10': s.diesel_s10 || s.dieselS10 || null,
+      'Diesel S500': s.diesel_s500 || s.dieselS500 || null,
+      'GNV': s.gnv || null,
+    },
+  })).filter(s => s.nome && s.nome !== 'Posto');
+}
+
+function parseHtmlStations(html: string): DeduraStation[] {
+  const stations: DeduraStation[] = [];
+
+  // Padrão para extrair blocos de posto do HTML
+  // Procura por h3 com nome do posto seguido de endereço e preço
+  const stationBlocks = html.split(/<h[23]/i).slice(1);
+
+  for (const block of stationBlocks) {
+    // Nome do posto
+    const nomeMatch = block.match(/^[^>]*>([^<]{3,80})</);
+    if (!nomeMatch) continue;
+    const nome = nomeMatch[1].trim().toUpperCase();
+
+    // Filtra blocos que não são postos
+    if (nome.length < 3 || nome.includes('PREÇO') || nome.includes('POSTOS') ||
+        nome.includes('MELHORES') || nome.includes('CIDADE') && nome.length > 20) continue;
+
+    // Endereço — procura padrão de logradouro brasileiro
+    const endMatch = block.match(/(?:Rua|Avenida|Av\.|R\.|Rodovia|Rod\.|Alameda|Al\.|Travessa|Trav\.|Praça)[^<]{10,120}/i);
+    const endereco = endMatch ? endMatch[0].replace(/\s+/g, ' ').trim() : '';
+
+    // Bandeira
+    let bandeira = 'Branco';
+    if (/petrobras|br\s*distribui/i.test(block)) bandeira = 'Petrobras';
+    else if (/ipiranga/i.test(block)) bandeira = 'Ipiranga';
+    else if (/shell|raizen/i.test(block)) bandeira = 'Shell';
+    else if (/ale\b/i.test(block)) bandeira = 'Ale';
+    else if (/branca|bandeira\s*branca/i.test(block)) bandeira = 'Branco';
+
+    // Preços — padrão R$ X,XX
+    const precoGasolina = extractPrice(block, /gasolina\s*(?:comum)?[^R]*R\$\s*([\d,\.]+)/i) ||
+                          extractPrice(block, /R\$\s*([\d,\.]+)/i);
+    const precoEtanol = extractPrice(block, /etanol[^R]*R\$\s*([\d,\.]+)/i) ||
+                        extractPrice(block, /álcool[^R]*R\$\s*([\d,\.]+)/i);
+    const precoDiesel = extractPrice(block, /diesel[^R]*R\$\s*([\d,\.]+)/i);
+    const precoGasolinaAditivada = extractPrice(block, /aditivada[^R]*R\$\s*([\d,\.]+)/i);
+    const precoGNV = extractPrice(block, /gnv[^R]*R\$\s*([\d,\.]+)/i);
+
+    if (nome.length >= 3) {
+      stations.push({
+        nome,
+        endereco,
+        bandeira,
+        precos: {
+          'Gasolina Comum': precoGasolina,
+          'Gasolina Aditivada': precoGasolinaAditivada,
+          'Etanol': precoEtanol,
+          'Diesel S10': precoDiesel,
+          'Diesel S500': null,
+          'GNV': precoGNV,
+        },
+      });
+    }
+  }
+
+  return stations.filter(s => s.nome.length > 2).slice(0, 30);
+}
+
+function extractPrice(text: string, pattern: RegExp): number | null {
+  const match = text.match(pattern);
+  if (!match) return null;
+  const raw = match[1].replace(',', '.');
+  const val = parseFloat(raw);
+  return val > 0 && val < 20 ? val : null;
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -97,146 +221,52 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Informe cidade ou localização' }, { status: 400 });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({ error: 'ANTHROPIC_API_KEY não configurada' }, { status: 503 });
+  // Detecta UF da cidade
+  const uf = await getStateUF(cidade);
+  if (!uf) {
+    return NextResponse.json({ error: 'Cidade não encontrada no Brasil' }, { status: 404 });
   }
 
-  const buscaLocal = cidade || `coordenadas ${latParam},${lonParam}`;
-  
-  // Identifica o centro da cidade antes para usar no prompt
-  const cityInfo = await getCityCenter(cidade || buscaLocal);
+  // Scrape dedurapreco.com
+  const stations = await scrapeDedura(cidade, uf);
 
-  try {
-    // ── Claude com web_search busca postos e preços ───────────────────────────
-    const response = await client.messages.create({
-      model: 'claude-sonnet-4-6',
-      max_tokens: 4000,
-      tools: [{ type: 'web_search_20250305', name: 'web_search' }],
-      messages: [
-        {
-          role: 'user',
-          content: `Você é um assistente que encontra postos de combustível com preços reais e atuais.
+  if (stations.length === 0) {
+    return NextResponse.json({ error: 'Nenhum posto encontrado no dedurapreco.com para essa cidade' }, { status: 404 });
+  }
 
-Pesquise na internet: "postos de combustível ${cityInfo.name} preços gasolina etanol diesel"
+  // Geocodifica endereços em paralelo (lotes de 4 para não sobrecarregar Nominatim)
+  const cityCenter = await getCityCenter(cidade);
 
-Também pesquise: "postos ${cityInfo.name} gaspedia OR waze OR cnpj posto"
+  const results: any[] = [];
+  const BATCH = 4;
 
-Com base nos resultados, monte uma lista dos postos de combustível encontrados ESPECIFICAMENTE em ${cityInfo.name}, Brasil.
-REGRA ABSOLUTA: NÃO INVENTE nomes ou endereços. Liste APENAS postos REAIS que você confirmar a existência na cidade através da sua busca na web. É preferível retornar menos postos do que postos inventados. Se não encontrar nenhum posto real, retorne uma lista vazia "postos": [].
-
-Para cada posto real encontrado, forneça:
-- nome do posto (Nome real)
-- endereço (Endereço real DENTRO da cidade ${cityInfo.name})
-- bandeira (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
-- preços em reais para: gasolina comum, gasolina aditivada, etanol, diesel s10, diesel s500, gnv
-
-Se encontrar o posto mas não encontrar os preços específicos dele, use a média atual da cidade/região para preencher os valores.
-
-Responda SOMENTE com JSON válido, sem texto antes ou depois:
-{
-  "cidade": "${cityInfo.name}",
-  "fonte": "nome do site ou fonte usada para achar os postos reais",
-  "postos": [
-    {
-      "nome": "Posto X (Real)",
-      "endereco": "Av. Y, 123, Bairro, Cidade",
-      "bandeira": "Shell",
-      "precos": {
-        "gasolina_comum": 6.29,
-        "gasolina_aditivada": 6.69,
-        "etanol": 4.21,
-        "diesel_s10": 6.08,
-        "diesel_s500": 5.89,
-        "gnv": null
-      }
-    }
-  ]
-}
-
-Lembre-se: Nomes e endereços devem ser os REAIS encontrados na internet. Use null para preços não encontrados.`,
-        },
-      ],
-    });
-
-    // ── Extrai o JSON da resposta do Claude ───────────────────────────────────
-    let jsonText = '';
-    for (const block of response.content) {
-      if (block.type === 'text') {
-        jsonText += block.text;
-      }
-    }
-
-    const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      return NextResponse.json({ error: 'Claude não retornou dados estruturados' }, { status: 502 });
-    }
-
-    let claudeData: any;
-    try {
-      claudeData = JSON.parse(jsonMatch[0]);
-    } catch {
-      const cleaned = jsonMatch[0].replace(/,\s*}/g, '}').replace(/,\s*]/g, ']');
-      claudeData = JSON.parse(cleaned);
-    }
-    
-    const postos: any[] = claudeData.postos || [];
-
-    if (postos.length === 0) {
-      return NextResponse.json({ error: 'Nenhum posto encontrado na busca' }, { status: 404 });
-    }
-
-    // ── Geocoda endereços em paralelo ─────────────────────────────────────────
-    const cityCenter = { lat: cityInfo.lat, lon: cityInfo.lon };
-
-    const geocodedPostos = await Promise.all(
-      postos.slice(0, 20).map(async (posto: any, idx: number) => {
+  for (let i = 0; i < stations.length; i += BATCH) {
+    const batch = stations.slice(i, i + BATCH);
+    const geocoded = await Promise.all(
+      batch.map(async (posto, idx) => {
         let coords = { ...cityCenter };
-        let hasExactLocation = false;
-        
-        if (posto.endereco && posto.endereco.length > 3) {
-          const geo = await geocodeAddress(posto.endereco, cityInfo.name, cityCenter);
-          if (geo) {
-            coords = geo;
-            hasExactLocation = true;
-          } else {
-            // Tenta geocodar apenas o nome do posto
-            if (posto.nome && posto.nome.length > 5) {
-              const geoNome = await geocodeAddress(posto.nome, cityInfo.name, cityCenter);
-              if (geoNome) {
-                coords = geoNome;
-                hasExactLocation = true;
-              }
-            }
+        if (posto.endereco && posto.endereco.length > 5) {
+          const geo = await geocodeAddress(posto.endereco, cidade);
+          if (geo) coords = geo;
+          else {
+            // Pequeno jitter para não empilhar no centro
+            coords.lat += (Math.random() - 0.5) * 0.008;
+            coords.lon += (Math.random() - 0.5) * 0.008;
           }
+        } else {
+          coords.lat += (Math.random() - 0.5) * 0.008;
+          coords.lon += (Math.random() - 0.5) * 0.008;
         }
 
-        // Adiciona um pequeno jitter para postos que caem exatamente no centro da cidade
-        if (!hasExactLocation) {
-          const jitterLat = (Math.random() - 0.5) * 0.005; // ~250m
-          const jitterLon = (Math.random() - 0.5) * 0.005; // ~250m
-          coords.lat += jitterLat;
-          coords.lon += jitterLon;
-        }
-
-        const precos = posto.precos || {};
-        const FUEL_MAP: Record<string, string> = {
-          gasolina_comum: 'Gasolina Comum',
-          gasolina_aditivada: 'Gasolina Aditivada',
-          etanol: 'Etanol',
-          diesel_s10: 'Diesel S10',
-          diesel_s500: 'Diesel S500',
-          gnv: 'GNV',
-        };
-
-        const stationId = `claude-${idx}-${Date.now()}`;
+        const stationId = `dedura-${i + idx}`;
         const stationInfo = {
           id: stationId,
           osm_id: null,
-          nome: posto.nome || 'Posto de Combustível',
-          bandeira: posto.bandeira || 'Branco',
-          endereco: posto.endereco || cityInfo.name,
-          cidade: cityInfo.name,
-          estado: '',
+          nome: posto.nome,
+          bandeira: posto.bandeira,
+          endereco: posto.endereco || cidade,
+          cidade,
+          estado: uf.toUpperCase(),
           latitude: coords.lat,
           longitude: coords.lon,
           ticket_log: false,
@@ -245,16 +275,15 @@ Lembre-se: Nomes e endereços devem ser os REAIS encontrados na internet. Use nu
         const entries: any[] = [];
         let temPreco = false;
 
-        for (const [key, tipo] of Object.entries(FUEL_MAP)) {
-          const preco = precos[key];
+        for (const [tipo, preco] of Object.entries(posto.precos)) {
           if (preco && typeof preco === 'number' && preco > 0) {
             temPreco = true;
             entries.push({
-              id: `${stationId}-${key}`,
+              id: `${stationId}-${tipo}`,
               tipo_combustivel: tipo,
               preco,
               data_atualizacao: new Date().toISOString(),
-              reportado_por: 'Claude AI',
+              reportado_por: 'dedurapreco.com',
               ticket_log: 'Não',
               stations: stationInfo,
             });
@@ -267,7 +296,7 @@ Lembre-se: Nomes e endereços devem ser os REAIS encontrados na internet. Use nu
             tipo_combustivel: 'sem_preco',
             preco: 0,
             data_atualizacao: new Date().toISOString(),
-            reportado_por: 'Claude AI',
+            reportado_por: 'dedurapreco.com',
             ticket_log: 'Não',
             stations: stationInfo,
           });
@@ -276,18 +305,14 @@ Lembre-se: Nomes e endereços devem ser os REAIS encontrados na internet. Use nu
         return entries;
       })
     );
-
-    const result = geocodedPostos.flat();
-
-    return NextResponse.json({
-      data: result,
-      source: `Claude AI — ${claudeData.fonte || 'busca web'}`,
-      total_osm: postos.length,
-      osm_unavailable: false,
-      cidade: cityInfo.name,
-    });
-  } catch (err: any) {
-    console.error('[claude-stations]', err.message);
-    return NextResponse.json({ error: err.message }, { status: 500 });
+    results.push(...geocoded.flat());
   }
+
+  return NextResponse.json({
+    data: results,
+    source: 'dedurapreco.com',
+    total_osm: stations.length,
+    osm_unavailable: false,
+    cidade,
+  });
 }

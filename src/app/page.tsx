@@ -210,7 +210,19 @@ export default function Home() {
           params.append('lon', String(coords.lng));
         }
 
-        // Fonte primária: OpenStreetMap (postos reais)
+        // Fonte primária: dedurapreco.com (postos + preços reais)
+        const deduraRes = await fetch(`/api/claude-stations?${params}`);
+        const deduraJson = await deduraRes.json();
+        if (!deduraJson.error && deduraJson.data && deduraJson.data.length > 0) {
+          const data: FuelPriceItem[] = deduraJson.data;
+          allPricesRef.current = data;
+          if (cidadeBusca.trim()) saveCache(cidadeBusca.trim(), data, 'dedurapreco.com');
+          setPrices(applyFilter(data, tipo || 'Todos'));
+          setSource('dedurapreco.com');
+          return;
+        }
+
+        // Fallback: OpenStreetMap (postos reais sem preço)
         const osmRes = await fetch(`/api/stations?${params}`);
         const osmJson = await osmRes.json();
         const osmData: FuelPriceItem[] = osmJson.data || [];
