@@ -72,6 +72,40 @@ export async function POST(request: NextRequest) {
       }
     }
 
+    // Sem UUID e sem osm_id: tenta achar/criar pelo nome+cidade (postos do dedurapreco)
+    if (!finalStationId && station_info?.nome && station_info?.cidade) {
+      const { data: byName } = await supabase
+        .from('stations')
+        .select('id')
+        .eq('nome', station_info.nome)
+        .eq('cidade', station_info.cidade)
+        .maybeSingle();
+
+      if (byName) {
+        finalStationId = byName.id;
+      } else {
+        const { data: newStation, error: createErr } = await supabase
+          .from('stations')
+          .insert({
+            nome: station_info.nome,
+            bandeira: station_info.bandeira || 'Branco',
+            endereco: station_info.endereco || station_info.cidade,
+            cidade: station_info.cidade,
+            estado: station_info.estado || '',
+            latitude: station_info.latitude || 0,
+            longitude: station_info.longitude || 0,
+          })
+          .select('id')
+          .single();
+
+        if (createErr) {
+          console.error('Erro ao criar posto:', createErr);
+          return NextResponse.json({ error: createErr.message }, { status: 500 });
+        }
+        finalStationId = newStation.id;
+      }
+    }
+
     if (!finalStationId) {
       return NextResponse.json(
         { error: 'Posto não identificado. Informe station_id ou osm_id + station_info.' },

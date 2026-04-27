@@ -245,12 +245,12 @@ export default function Home() {
     }
     setReportSubmitting(true);
     try {
-      const isOsmOnly = reportStationObj.id.startsWith('osm-');
+      const needsStationInfo = reportStationObj.id.startsWith('osm-') || reportStationObj.id.startsWith('dedura-') || reportStationObj.id.startsWith('sem-preco-');
       const res = await fetch('/api/report-price', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          station_id: isOsmOnly ? undefined : reportStationObj.id,
+          station_id: needsStationInfo ? undefined : reportStationObj.id,
           osm_id: reportStationObj.osm_id,
           station_info: {
             nome: reportStationObj.nome,

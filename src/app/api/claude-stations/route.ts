@@ -5,21 +5,27 @@ export const maxDuration = 30;
 
 const ALL_FUELS = ['Gasolina Comum','Gasolina Aditivada','Etanol','Diesel S10','Diesel S500','GNV'];
 
-// ─── ANP: média real da cidade via Supabase ───────────────────────────────────
-async function getAnpCityPrices(municipio: string, estado: string): Promise<Record<string,number>> {
+// ─── Preços reportados por usuários via Supabase ─────────────────────────────
+// Retorna: Map<nome_normalizado, Record<tipo_combustivel, {preco, data}>>
+async function getUserReportedPrices(cidade: string): Promise<Map<string, Record<string,{preco:number;data:string}>>> {
   try {
-    const url  = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (!url || !key) return {};
+    const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return new Map();
     const supabase = createClient(url, key);
     const { data } = await supabase
-      .from('anp_city_prices')
-      .select('produto, preco_medio')
-      .eq('municipio', municipio.toUpperCase().trim())
-      .eq('estado', estado.toLowerCase().trim());
-    if (!data?.length) return {};
-    return Object.fromEntries(data.map((r: any) => [r.produto, r.preco_medio]));
-  } catch { return {}; }
+      .from('latest_prices')
+      .select('nome, tipo_combustivel, preco, data_atualizacao')
+      .eq('cidade', cidade);
+    if (!data?.length) return new Map();
+    const map = new Map<string, Record<string,{preco:number;data:string}>>();
+    for (const r of data) {
+      const key2 = (r.nome as string).toLowerCase().replace(/\s+/g,'');
+      if (!map.has(key2)) map.set(key2, {});
+      map.get(key2)![r.tipo_combustivel] = { preco: Number(r.preco), data: r.data_atualizacao };
+    }
+    return map;
+  } catch { return new Map(); }
 }
 
 
@@ -180,10 +186,10 @@ export async function GET(request: NextRequest) {
 
   if (!uf) return NextResponse.json({ error: 'Cidade não encontrada no Brasil' }, { status: 404 });
 
-  // Busca dedurapreco + ANP municipal em paralelo
-  const [{ stations, bestPrices }, anpPrices] = await Promise.all([
+  // Busca dedurapreco + preços reportados por usuários em paralelo
+  const [{ stations, bestPrices }, userPrices] = await Promise.all([
     fetchDedura(cidade, uf),
-    getAnpCityPrices(cidade, uf),
+    getUserReportedPrices(cidade),
   ]);
 
   if (stations.length === 0) return NextResponse.json({ error: 'Nenhum posto encontrado' }, { status: 404 });
@@ -194,7 +200,7 @@ export async function GET(request: NextRequest) {
 
   for (let i = 0; i < stations.length; i += BATCH) {
     const batch = stations.slice(i, i + BATCH);
-    const geocoded = await Promise.all(batch.map(async (posto, idx) => {
+    const geocoded = await Promise.all(batch.map(async (posto: DeduraStation, idx: number) => {
       let coords = { lat: cityCenter.lat + (Math.random()-0.5)*0.01, lon: cityCenter.lon + (Math.random()-0.5)*0.01 };
 
       if (posto.endereco.length > 5) {
@@ -214,34 +220,41 @@ export async function GET(request: NextRequest) {
         ticket_log: false,
       };
 
+      // Preços reportados por usuários para este posto (match por nome normalizado)
+      const nomeNorm = posto.nome.toLowerCase().replace(/\s+/g,'');
+      const userPostoPrices = userPrices.get(nomeNorm) || {};
+
       const entries: any[] = [];
 
       for (const tipo of ALL_FUELS) {
         let preco = 0;
         let fonte = 'dedurapreco.com';
+        let dataAtualizacao = new Date().toISOString();
 
-        if (posto.precos[tipo]) {
+        // Prioridade 1: preço reportado por usuário (mais confiável)
+        if (userPostoPrices[tipo]) {
+          preco = userPostoPrices[tipo].preco;
+          fonte = 'usuário';
+          dataAtualizacao = userPostoPrices[tipo].data;
+        }
+        // Prioridade 2: preço direto do dedurapreco para este posto
+        else if (posto.precos[tipo]) {
           preco = posto.precos[tipo];
-        } else if (bestPrices[tipo]) {
+        }
+        // Prioridade 3: melhor preço da página do dedurapreco (parcial)
+        else if (bestPrices[tipo]) {
           const bp = bestPrices[tipo];
-          const nNorm = posto.nome.toLowerCase().replace(/\s+/g,'');
           const bNorm = bp.posto.toLowerCase().replace(/\s+/g,'');
-          if (nNorm.includes(bNorm.slice(0,8)) || bNorm.includes(nNorm.slice(0,8))) {
+          if (nomeNorm.includes(bNorm.slice(0,8)) || bNorm.includes(nomeNorm.slice(0,8))) {
             preco = bp.preco;
           }
-        }
-
-        // Fallback: média real da cidade via ANP (quando disponível)
-        if (!preco && anpPrices[tipo]) {
-          preco = anpPrices[tipo];
-          fonte = 'média ANP da cidade';
         }
 
         if (preco > 0) {
           entries.push({
             id: `${stationId}-${tipo}`,
             tipo_combustivel: tipo, preco,
-            data_atualizacao: new Date().toISOString(),
+            data_atualizacao: dataAtualizacao,
             reportado_por: fonte, ticket_log: 'Não',
             stations: stationInfo,
           });
