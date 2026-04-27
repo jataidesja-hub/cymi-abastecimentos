@@ -36,8 +36,8 @@ const UF_SLUG: Record<string,string> = {
   sc:'santa-catarina',sp:'sao-paulo',se:'sergipe',to:'tocantins',
 };
 
-// ─── Passo 1: geocodifica cidade uma única vez ────────────────────────────────
-async function geocodeCity(cidade: string, apiKey: string): Promise<{lat:number;lon:number;uf:string}|null> {
+// ─── Google Geocoding ─────────────────────────────────────────────────────────
+async function getCityInfo(cidade: string, apiKey: string): Promise<{lat:number;lon:number;uf:string}|null> {
   try {
     const res = await fetch(
       `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(cidade+', Brasil')}&key=${apiKey}`,
@@ -54,36 +54,27 @@ async function geocodeCity(cidade: string, apiKey: string): Promise<{lat:number;
   } catch { return null; }
 }
 
-// ─── Passo 2a: Google Nearby Search (usa lat/lon já obtidos) ─────────────────
-async function nearbyGasStations(lat: number, lon: number, apiKey: string) {
+async function geocodeAddress(endereco: string, cidade: string, apiKey: string): Promise<{lat:number;lon:number}|null> {
   try {
     const res = await fetch(
-      `https://maps.googleapis.com/maps/api/place/nearbysearch/json?location=${lat},${lon}&radius=8000&type=gas_station&language=pt-BR&key=${apiKey}`,
-      { signal: AbortSignal.timeout(8000) }
+      `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(endereco+', '+cidade+', Brasil')}&key=${apiKey}`,
+      { signal: AbortSignal.timeout(4000) }
     );
     const data = await res.json();
-    return (data.results || []).slice(0, 20).map((p: any) => {
-      const nome: string = p.name || 'Posto';
-      const n = nome.toLowerCase();
-      let bandeira = 'Branco';
-      if (n.includes('shell')) bandeira = 'Shell';
-      else if (n.includes('ipiranga')) bandeira = 'Ipiranga';
-      else if (n.includes('petrobras') || /\bbr\b/.test(n)) bandeira = 'Petrobras';
-      else if (/\bale\b/.test(n)) bandeira = 'Ale';
-      return { nome, endereco: p.vicinity || '', lat: p.geometry.location.lat, lon: p.geometry.location.lng, bandeira };
-    });
-  } catch { return []; }
+    const loc = data.results?.[0]?.geometry?.location;
+    return loc ? { lat: loc.lat, lon: loc.lng } : null;
+  } catch { return null; }
 }
 
-// ─── Passo 2b: dedurapreco scraping ──────────────────────────────────────────
+// ─── dedurapreco ──────────────────────────────────────────────────────────────
+interface DeduraStation { nome: string; endereco: string; bandeira: string; precos: Record<string,number> }
+
 function decodeHtml(s: string): string {
   return s.replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>')
           .replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n)).replace(/&nbsp;/g,' ');
 }
 
-interface DeduraStation { nome: string; precos: Record<string,number> }
-
-function parseDedura(html: string) {
+function parseDedura(html: string): { stations: DeduraStation[]; bestPrices: Record<string,{preco:number;posto:string}> } {
   const stations: DeduraStation[] = [];
   const bestPrices: Record<string,{preco:number;posto:string}> = {};
   const fuelLabels: Record<string,string> = {
@@ -108,21 +99,31 @@ function parseDedura(html: string) {
     const nomeM = block.match(/^[^>]*>([^<]{2,120})<\/h3>/i);
     if (!nomeM) continue;
     const nome = decodeHtml(nomeM[1].trim().replace(/\s+/g,' '));
-    if (nome.length < 2 || /melhores|preços|postos|busca|filtro/i.test(nome)) continue;
+    if (nome.length < 2 || /melhores|preços|postos|busca|filtro|cidade/i.test(nome)) continue;
+
+    const endM = block.match(/(?:Rua|Avenida|Av\b|Rod(?:ovia)?\.?|Alameda|Travessa|Praça|Estrada|BR-?\d{2,3}|Largo)[^<]{5,150}/i);
+    const endereco = endM ? decodeHtml(endM[0].replace(/<[^>]+>/g,'').replace(/\s+/g,' ').trim()) : '';
+
+    let bandeira = 'Branco';
+    if (/petrobras|br distribui/i.test(block)) bandeira = 'Petrobras';
+    else if (/ipiranga/i.test(block)) bandeira = 'Ipiranga';
+    else if (/shell|raizen/i.test(block)) bandeira = 'Shell';
+    else if (/\bale\b/i.test(block)) bandeira = 'Ale';
+
     const precos: Record<string,number> = {};
     for (const [label, tipo] of Object.entries(fuelLabels)) {
       const re = new RegExp(`${label}[^R<]{0,30}R\\$\\s*([\\d,\\.]+)`, 'i');
       const m = block.match(re);
       if (m) { const v=parseFloat(m[1].replace(',','.')); if(v>1&&v<20) precos[tipo]=v; }
     }
-    stations.push({ nome, precos });
+    stations.push({ nome, endereco, bandeira, precos });
   }
-  return { stations: stations.slice(0,30), bestPrices };
+  return { stations: stations.slice(0,25), bestPrices };
 }
 
 async function fetchDedura(cidade: string, uf: string) {
   const stateSlug = UF_SLUG[uf];
-  if (!stateSlug) return { stations:[], bestPrices:{} };
+  if (!stateSlug) return { stations:[] as DeduraStation[], bestPrices:{} as Record<string,{preco:number;posto:string}> };
   try {
     const res = await fetch(
       `https://dedurapreco.com/preco-do-combustivel/${stateSlug}/${toSlug(cidade)}`,
@@ -134,43 +135,9 @@ async function fetchDedura(cidade: string, uf: string) {
         signal: AbortSignal.timeout(9000),
       }
     );
-    if (!res.ok) return { stations:[], bestPrices:{} };
+    if (!res.ok) return { stations:[] as DeduraStation[], bestPrices:{} as Record<string,{preco:number;posto:string}> };
     return parseDedura(await res.text());
-  } catch { return { stations:[], bestPrices:{} }; }
-}
-
-// ─── Matching nome Google ↔ dedurapreco ───────────────────────────────────────
-function norm(s: string): string {
-  return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'')
-    .replace(/posto|auto|gas\b|rede|combustivel|abastecimento/gi,'')
-    .replace(/\s+/g,'').trim();
-}
-
-function matchDedura(googleName: string, deduraStations: DeduraStation[], bestPrices: Record<string,{preco:number;posto:string}>) {
-  const gn = norm(googleName);
-  let matched: DeduraStation | null = null;
-
-  for (const s of deduraStations) {
-    const dn = norm(s.nome);
-    const minLen = Math.min(gn.length, dn.length, 6);
-    if (minLen >= 4 && (gn.includes(dn.slice(0,minLen)) || dn.includes(gn.slice(0,minLen)))) {
-      matched = s; break;
-    }
-  }
-
-  const result: Record<string,{preco:number;fonte:string}> = {};
-  for (const tipo of ALL_FUELS) {
-    if (matched?.precos[tipo]) {
-      result[tipo] = { preco: matched.precos[tipo], fonte: 'dedurapreco.com' };
-    } else if (bestPrices[tipo]) {
-      const bn = norm(bestPrices[tipo].posto);
-      const minLen = Math.min(gn.length, bn.length, 5);
-      if (minLen >= 4 && (gn.includes(bn.slice(0,minLen)) || bn.includes(gn.slice(0,minLen)))) {
-        result[tipo] = { preco: bestPrices[tipo].preco, fonte: 'dedurapreco.com' };
-      }
-    }
-  }
-  return result;
+  } catch { return { stations:[] as DeduraStation[], bestPrices:{} as Record<string,{preco:number;posto:string}> }; }
 }
 
 // ─── Handler ─────────────────────────────────────────────────────────────────
@@ -179,61 +146,96 @@ export async function GET(request: NextRequest) {
   const cidade = (searchParams.get('cidade') || '').trim();
   if (!cidade) return NextResponse.json({ error: 'Informe cidade' }, { status: 400 });
 
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return NextResponse.json({ error: 'GOOGLE_MAPS_API_KEY não configurada' }, { status: 503 });
+  const apiKey = process.env.GOOGLE_MAPS_API_KEY || '';
 
-  // Geocodifica uma única vez
-  const geo = await geocodeCity(cidade, apiKey);
-  if (!geo) return NextResponse.json({ error: 'Cidade não encontrada' }, { status: 404 });
+  // Geocodifica cidade via Google para pegar UF + centro
+  const cityInfo = apiKey ? await getCityInfo(cidade, apiKey) : null;
+  let uf = cityInfo?.uf || '';
 
-  const { lat, lon, uf } = geo;
-
-  // Nearby Search + dedurapreco em paralelo
-  const [googleStations, deduraData] = await Promise.all([
-    nearbyGasStations(lat, lon, apiKey),
-    uf && UF_SLUG[uf] ? fetchDedura(cidade, uf) : Promise.resolve({ stations:[], bestPrices:{} }),
-  ]);
-
-  if (googleStations.length === 0) {
-    return NextResponse.json({ error: 'Nenhum posto encontrado pelo Google Maps' }, { status: 404 });
+  // Fallback UF via Nominatim
+  if (!uf) {
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cidade+', Brasil')}&format=json&limit=1&addressdetails=1&countrycodes=br`,
+        { headers:{'User-Agent':'MAPM-App/1.0'}, signal:AbortSignal.timeout(4000) }
+      );
+      const data = await res.json();
+      const stateMap: Record<string,string> = {
+        'Acre':'ac','Alagoas':'al','Amapá':'ap','Amazonas':'am','Bahia':'ba','Ceará':'ce',
+        'Distrito Federal':'df','Espírito Santo':'es','Goiás':'go','Maranhão':'ma',
+        'Mato Grosso':'mt','Mato Grosso do Sul':'ms','Minas Gerais':'mg','Pará':'pa',
+        'Paraíba':'pb','Paraná':'pr','Pernambuco':'pe','Piauí':'pi','Rio de Janeiro':'rj',
+        'Rio Grande do Norte':'rn','Rio Grande do Sul':'rs','Rondônia':'ro','Roraima':'rr',
+        'Santa Catarina':'sc','São Paulo':'sp','Sergipe':'se','Tocantins':'to',
+      };
+      uf = stateMap[data[0]?.address?.state || ''] || '';
+    } catch {}
   }
 
+  if (!uf) return NextResponse.json({ error: 'Cidade não encontrada no Brasil' }, { status: 404 });
+
+  const { stations, bestPrices } = await fetchDedura(cidade, uf);
+  if (stations.length === 0) return NextResponse.json({ error: 'Nenhum posto encontrado' }, { status: 404 });
+
+  const cityCenter = cityInfo || { lat: -14.24, lon: -51.93 };
   const anp = getANP(uf);
-  const { stations: deduraStations, bestPrices } = deduraData;
   const results: any[] = [];
+  const BATCH = 4;
 
-  for (let i = 0; i < googleStations.length; i++) {
-    const g = googleStations[i];
-    const stationId = `gmap-${i}`;
-    const stationInfo = {
-      id: stationId, osm_id: null,
-      nome: g.nome, bandeira: g.bandeira,
-      endereco: g.endereco,
-      cidade, estado: uf.toUpperCase(),
-      latitude: g.lat, longitude: g.lon,
-      ticket_log: false,
-    };
+  for (let i = 0; i < stations.length; i += BATCH) {
+    const batch = stations.slice(i, i + BATCH);
+    const geocoded = await Promise.all(batch.map(async (posto, idx) => {
+      let coords = { lat: cityCenter.lat + (Math.random()-0.5)*0.01, lon: cityCenter.lon + (Math.random()-0.5)*0.01 };
 
-    const matched = matchDedura(g.nome, deduraStations, bestPrices);
+      if (posto.endereco.length > 5) {
+        const geo = apiKey
+          ? await geocodeAddress(posto.endereco, cidade, apiKey)
+          : null;
+        if (geo) coords = geo;
+      }
 
-    for (const tipo of ALL_FUELS) {
-      const m = matched[tipo];
-      results.push({
-        id: `${stationId}-${tipo}`,
-        tipo_combustivel: tipo,
-        preco: m ? m.preco : (anp[tipo] || 0),
-        data_atualizacao: new Date().toISOString(),
-        reportado_por: m ? m.fonte : 'estimativa regional',
-        ticket_log: 'Não',
-        stations: stationInfo,
+      const stationId = `dedura-${i+idx}`;
+      const stationInfo = {
+        id: stationId, osm_id: null,
+        nome: posto.nome, bandeira: posto.bandeira,
+        endereco: posto.endereco || cidade,
+        cidade, estado: uf.toUpperCase(),
+        latitude: coords.lat, longitude: coords.lon,
+        ticket_log: false,
+      };
+
+      return ALL_FUELS.map(tipo => {
+        let preco = 0;
+        let fonte = 'estimativa regional';
+
+        if (posto.precos[tipo]) {
+          preco = posto.precos[tipo]; fonte = 'dedurapreco.com';
+        } else if (bestPrices[tipo]) {
+          const bp = bestPrices[tipo];
+          const nNorm = posto.nome.toLowerCase().replace(/\s+/g,'');
+          const bNorm = bp.posto.toLowerCase().replace(/\s+/g,'');
+          if (nNorm.includes(bNorm.slice(0,8)) || bNorm.includes(nNorm.slice(0,8))) {
+            preco = bp.preco; fonte = 'dedurapreco.com';
+          }
+        }
+        if (!preco && anp[tipo]) preco = anp[tipo];
+
+        return {
+          id: `${stationId}-${tipo}`,
+          tipo_combustivel: tipo, preco,
+          data_atualizacao: new Date().toISOString(),
+          reportado_por: fonte, ticket_log: 'Não',
+          stations: stationInfo,
+        };
       });
-    }
+    }));
+    results.push(...geocoded.flat());
   }
 
   return NextResponse.json({
     data: results,
-    source: 'Google Maps + dedurapreco.com',
-    total_osm: googleStations.length,
+    source: apiKey ? 'dedurapreco.com + Google Maps' : 'dedurapreco.com',
+    total_osm: stations.length,
     cidade,
   });
 }
