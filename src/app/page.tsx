@@ -288,7 +288,7 @@ export default function Home() {
     prices.forEach(p => {
       const sid = p.stations.id;
       if (!map.has(sid)) map.set(sid, { station: p.stations, prices: [] });
-      if (p.tipo_combustivel !== 'sem_preco' && p.preco > 0) {
+      if (p.tipo_combustivel !== 'sem_preco') {
         map.get(sid)!.prices.push({
           tipo: p.tipo_combustivel,
           preco: p.preco,
@@ -310,8 +310,10 @@ export default function Home() {
 
     // Ordena: com preço mais barato primeiro, depois sem preço
     return stations.sort((a, b) => {
-      const aMin = a.prices.length > 0 ? Math.min(...a.prices.map(p => p.preco)) : Infinity;
-      const bMin = b.prices.length > 0 ? Math.min(...b.prices.map(p => p.preco)) : Infinity;
+      const aPrices = a.prices.filter(p => p.preco > 0).map(p => p.preco);
+      const bPrices = b.prices.filter(p => p.preco > 0).map(p => p.preco);
+      const aMin = aPrices.length > 0 ? Math.min(...aPrices) : Infinity;
+      const bMin = bPrices.length > 0 ? Math.min(...bPrices) : Infinity;
       return aMin - bMin;
     });
   }, [prices, ticketLogOnly]);
@@ -624,8 +626,14 @@ export default function Home() {
                                 <span className="price-row-label">{p.tipo}</span>
                               </div>
                               <span className={`price-row-value ${colorClass}`}>
-                                <span className="price-row-rs">R$</span>
-                                {p.preco.toFixed(2)}
+                                {p.preco > 0 ? (
+                                  <>
+                                    <span className="price-row-rs">R$</span>
+                                    {p.preco.toFixed(2)}
+                                  </>
+                                ) : (
+                                  <span className="text-gray-500 text-[10px]">S/ Info</span>
+                                )}
                               </span>
                             </div>
                           );

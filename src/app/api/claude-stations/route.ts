@@ -67,13 +67,15 @@ Faça as seguintes pesquisas:
 1. "preço gasolina ${buscaLocal} 2025 posto"
 2. "preço etanol diesel ${buscaLocal} hoje"
 3. site:dedurapreco.com "${buscaLocal}"
+4. "postos ${buscaLocal} gaspedia OR waze"
 
 IMPORTANTE:
-- Retorne APENAS postos com dados encontrados na web — NÃO invente postos ou preços
-- Cada posto pode ter preços DIFERENTES entre si — NÃO use o mesmo valor para todos
-- Use null para combustíveis que não encontrou para aquele posto específico
-- O endereço deve ser o real encontrado na busca (rua, número, bairro)
-- A bandeira deve ser a real do posto (Shell, Ipiranga, Petrobras/BR, Ale, Branco)
+- Retorne APENAS postos com dados encontrados na web — NÃO invente postos ou preços.
+- Busque o NOME REAL do posto. Não responda "Posto (sem nome identificado)". Se achou apenas o endereço, tente buscar no Google/Waze qual posto fica nesse endereço.
+- Cada posto pode ter preços DIFERENTES entre si — NÃO use o mesmo valor para todos.
+- Use null para combustíveis que não encontrou para aquele posto específico.
+- O endereço deve ser o real encontrado na busca (rua, número, bairro).
+- A bandeira deve ser a real do posto (Shell, Ipiranga, Petrobras/BR, Ale, Branco).
 
 Responda SOMENTE com JSON válido:
 {
@@ -81,9 +83,9 @@ Responda SOMENTE com JSON válido:
   "fonte": "nome do site usado",
   "postos": [
     {
-      "nome": "Nome Real do Posto",
-      "endereco": "Endereço Real, Bairro",
-      "bandeira": "Shell",
+      "nome": "Auto Posto Vale do São Francisco (Nome Real)",
+      "endereco": "Avenida Guararapes, 2040A, Centro",
+      "bandeira": "Petrobras",
       "precos": {
         "gasolina_comum": 6.29,
         "gasolina_aditivada": null,
@@ -158,26 +160,17 @@ Responda SOMENTE com JSON válido:
         let temPreco = false;
 
         for (const [key, tipo] of Object.entries(FUEL_MAP)) {
-          const preco = precos[key];
-          if (preco && typeof preco === 'number' && preco > 0) {
+          const precoRaw = precos[key];
+          const preco = (typeof precoRaw === 'number' && precoRaw > 0) ? precoRaw : 0;
+          
+          if (preco > 0) {
             temPreco = true;
-            entries.push({
-              id: `${stationId}-${key}`,
-              tipo_combustivel: tipo,
-              preco,
-              data_atualizacao: new Date().toISOString(),
-              reportado_por: 'Claude AI',
-              ticket_log: 'Não',
-              stations: stationInfo,
-            });
           }
-        }
 
-        if (!temPreco) {
           entries.push({
-            id: `sem-preco-${stationId}`,
-            tipo_combustivel: 'sem_preco',
-            preco: 0,
+            id: `${stationId}-${key}`,
+            tipo_combustivel: tipo,
+            preco,
             data_atualizacao: new Date().toISOString(),
             reportado_por: 'Claude AI',
             ticket_log: 'Não',
