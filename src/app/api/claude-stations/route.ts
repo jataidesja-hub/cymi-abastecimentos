@@ -4,23 +4,7 @@ export const maxDuration = 30;
 
 const ALL_FUELS = ['Gasolina Comum','Gasolina Aditivada','Etanol','Diesel S10','Diesel S500','GNV'];
 
-const ANP: Record<string, Record<string, number>> = {
-  default:    { 'Gasolina Comum':6.29,'Gasolina Aditivada':6.69,'Etanol':4.21,'Diesel S10':6.08,'Diesel S500':5.89,'GNV':4.39 },
-  nordeste:   { 'Gasolina Comum':6.35,'Gasolina Aditivada':6.75,'Etanol':4.35,'Diesel S10':6.12,'Diesel S500':5.92,'GNV':4.42 },
-  sudeste:    { 'Gasolina Comum':6.18,'Gasolina Aditivada':6.58,'Etanol':4.05,'Diesel S10':6.01,'Diesel S500':5.82,'GNV':4.31 },
-  sul:        { 'Gasolina Comum':6.22,'Gasolina Aditivada':6.62,'Etanol':4.12,'Diesel S10':6.05,'Diesel S500':5.85,'GNV':4.35 },
-  norte:      { 'Gasolina Comum':6.52,'Gasolina Aditivada':6.92,'Etanol':4.51,'Diesel S10':6.25,'Diesel S500':6.05,'GNV':4.55 },
-  centroeste: { 'Gasolina Comum':6.31,'Gasolina Aditivada':6.71,'Etanol':4.18,'Diesel S10':6.09,'Diesel S500':5.88,'GNV':4.40 },
-};
 
-function getANP(uf: string): Record<string, number> {
-  if (['al','ba','ce','ma','pb','pe','pi','rn','se'].includes(uf)) return ANP.nordeste;
-  if (['es','mg','rj','sp'].includes(uf)) return ANP.sudeste;
-  if (['pr','rs','sc'].includes(uf)) return ANP.sul;
-  if (['ac','am','ap','pa','ro','rr','to'].includes(uf)) return ANP.norte;
-  if (['df','go','ms','mt'].includes(uf)) return ANP.centroeste;
-  return ANP.default;
-}
 
 function toSlug(str: string): string {
   return str.toLowerCase().normalize('NFD')
@@ -182,7 +166,6 @@ export async function GET(request: NextRequest) {
   if (stations.length === 0) return NextResponse.json({ error: 'Nenhum posto encontrado' }, { status: 404 });
 
   const cityCenter = cityInfo || { lat: -14.24, lon: -51.93 };
-  const anp = getANP(uf);
   const results: any[] = [];
   const BATCH = 4;
 
@@ -208,30 +191,47 @@ export async function GET(request: NextRequest) {
         ticket_log: false,
       };
 
-      return ALL_FUELS.map(tipo => {
+      const entries: any[] = [];
+
+      for (const tipo of ALL_FUELS) {
         let preco = 0;
-        let fonte = 'estimativa regional';
+        let fonte = 'dedurapreco.com';
 
         if (posto.precos[tipo]) {
-          preco = posto.precos[tipo]; fonte = 'dedurapreco.com';
+          preco = posto.precos[tipo];
         } else if (bestPrices[tipo]) {
           const bp = bestPrices[tipo];
           const nNorm = posto.nome.toLowerCase().replace(/\s+/g,'');
           const bNorm = bp.posto.toLowerCase().replace(/\s+/g,'');
           if (nNorm.includes(bNorm.slice(0,8)) || bNorm.includes(nNorm.slice(0,8))) {
-            preco = bp.preco; fonte = 'dedurapreco.com';
+            preco = bp.preco;
           }
         }
-        if (!preco && anp[tipo]) preco = anp[tipo];
 
-        return {
-          id: `${stationId}-${tipo}`,
-          tipo_combustivel: tipo, preco,
+        // Só inclui se tem preço REAL — sem estimativas
+        if (preco > 0) {
+          entries.push({
+            id: `${stationId}-${tipo}`,
+            tipo_combustivel: tipo, preco,
+            data_atualizacao: new Date().toISOString(),
+            reportado_por: fonte, ticket_log: 'Não',
+            stations: stationInfo,
+          });
+        }
+      }
+
+      // Se não tem nenhum preço real, inclui como sem_preco
+      if (entries.length === 0) {
+        entries.push({
+          id: `sem-preco-${stationId}`,
+          tipo_combustivel: 'sem_preco', preco: 0,
           data_atualizacao: new Date().toISOString(),
-          reportado_por: fonte, ticket_log: 'Não',
+          reportado_por: 'dedurapreco.com', ticket_log: 'Não',
           stations: stationInfo,
-        };
-      });
+        });
+      }
+
+      return entries;
     }));
     results.push(...geocoded.flat());
   }
