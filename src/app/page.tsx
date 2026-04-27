@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import dynamic from 'next/dynamic';
 import InstallPrompt from '@/components/InstallPrompt';
 
@@ -77,6 +77,10 @@ function timeAgo(dateStr: string): string {
 export default function Home() {
   const allPricesRef = useRef<FuelPriceItem[]>([]);
   const [cidade, setCidade] = useState('');
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const autocompleteRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeFuel, setActiveFuel] = useState('Todos');
   const [ticketLogOnly, setTicketLogOnly] = useState(false); // eslint-disable-line
   const [prices, setPrices] = useState<FuelPriceItem[]>([]);
@@ -156,8 +160,36 @@ export default function Home() {
     []
   );
 
+  // Autocomplete: busca sugestões ao digitar
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (cidade.length < 2) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/city-autocomplete?q=${encodeURIComponent(cidade)}`);
+        const json = await res.json();
+        setSuggestions(json.suggestions || []);
+        setShowSuggestions(true);
+      } catch { setSuggestions([]); }
+    }, 300);
+    return () => { if (debounceRef.current) clearTimeout(debounceRef.current); };
+  }, [cidade]);
+
+  // Fecha sugestões ao clicar fora
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (autocompleteRef.current && !autocompleteRef.current.contains(e.target as Node)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
   const handleSearch = () => {
     if (cidade.trim()) {
+      setSuggestions([]);
+      setShowSuggestions(false);
       allPricesRef.current = [];
       try { sessionStorage.clear(); } catch {}
       fetchPrices(cidade, activeFuel);
@@ -388,13 +420,15 @@ export default function Home() {
             <span className="ai-dot"></span> IA Expert
           </button>
         </div>
-        <div className="location-bar">
+        <div className="location-bar" style={{ position: 'relative' }} ref={autocompleteRef}>
           <input
             className="location-input"
             placeholder="Digite a cidade..."
             value={cidade}
-            onChange={e => setCidade(e.target.value)}
+            onChange={e => { setCidade(e.target.value); setShowSuggestions(true); }}
             onKeyDown={e => e.key === 'Enter' && handleSearch()}
+            onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+            autoComplete="off"
           />
           <button
             className={`gps-btn ${gpsLoading ? 'loading' : ''}`}
@@ -403,6 +437,38 @@ export default function Home() {
           >
             🎯
           </button>
+          {showSuggestions && suggestions.length > 0 && (
+            <div style={{
+              position: 'absolute', top: '100%', left: 0, right: 48,
+              background: '#1e293b', border: '1px solid #334155',
+              borderRadius: '0 0 12px 12px', zIndex: 100,
+              boxShadow: '0 8px 24px rgba(0,0,0,0.4)', overflow: 'hidden',
+            }}>
+              {suggestions.map((s, i) => (
+                <div
+                  key={i}
+                  onMouseDown={() => {
+                    setCidade(s);
+                    setSuggestions([]);
+                    setShowSuggestions(false);
+                    allPricesRef.current = [];
+                    try { sessionStorage.clear(); } catch {}
+                    fetchPrices(s, activeFuel);
+                  }}
+                  style={{
+                    padding: '0.65rem 1rem', cursor: 'pointer', fontSize: 14,
+                    color: '#e2e8f0', borderBottom: i < suggestions.length - 1 ? '1px solid #1e293b' : 'none',
+                    background: '#1e293b', display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  }}
+                  onMouseEnter={e => (e.currentTarget.style.background = '#2d3f55')}
+                  onMouseLeave={e => (e.currentTarget.style.background = '#1e293b')}
+                >
+                  <span style={{ color: '#60a5fa', fontSize: 12 }}>📍</span>
+                  {s}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </header>
 
