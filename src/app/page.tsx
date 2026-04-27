@@ -323,6 +323,18 @@ export default function Home() {
     [prices]
   );
 
+  // Posto mais barato por tipo de combustível
+  const cheapestByFuel = useMemo(() => {
+    const map: Record<string, { preco: number; station: Station }> = {};
+    for (const p of realPrices) {
+      const tipo = p.tipo_combustivel;
+      if (!map[tipo] || p.preco < map[tipo].preco) {
+        map[tipo] = { preco: p.preco, station: p.stations };
+      }
+    }
+    return map;
+  }, [realPrices]);
+
   const stats = useMemo(() => {
     const etanolList = realPrices.filter(p => p.tipo_combustivel === 'Etanol').map(p => p.preco);
     const gasolinaList = realPrices.filter(p => p.tipo_combustivel === 'Gasolina Comum').map(p => p.preco);
@@ -565,20 +577,56 @@ export default function Home() {
               )}
             </div>
 
-            {groupedStations.map((g, i) => {
+            {/* ── Ranking por combustível ── */}
+            {Object.keys(cheapestByFuel).length > 0 && (
+              <div style={{ marginBottom: '0.75rem' }}>
+                <div style={{ fontSize: 11, color: '#64748b', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: '0.5rem', paddingLeft: 2 }}>
+                  Mais barato por combustível
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', paddingBottom: '0.25rem' }}>
+                  {Object.entries(cheapestByFuel).map(([tipo, { preco, station }]) => (
+                    <div key={tipo} style={{
+                      flexShrink: 0, background: '#0f2d1a', border: '1px solid #166534',
+                      borderRadius: 10, padding: '0.6rem 0.8rem', minWidth: 130,
+                    }}>
+                      <div style={{ fontSize: 10, color: '#4ade80', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 2 }}>
+                        {FUEL_ICONS[tipo] || '⛽'} {tipo}
+                      </div>
+                      <div style={{ fontSize: 18, fontWeight: 800, color: '#4ade80', lineHeight: 1.1 }}>
+                        R${preco.toFixed(2)}
+                      </div>
+                      <div style={{ fontSize: 10, color: '#86efac', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 120 }}>
+                        {station.nome}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {groupedStations.map((g) => {
               const hasPrices = g.prices.length > 0;
               const isWeb = g.prices.some(p => p.fonte === 'pesquisa web');
               const isTicketLog =
                 g.station.ticket_log ||
                 prices.find(p => p.stations.id === g.station.id)?.ticket_log === 'Sim';
 
+              // Tipos de combustível onde este posto é o mais barato
+              const cheapestFuels = g.prices
+                .filter(p => p.preco > 0 && cheapestByFuel[p.tipo]?.station.id === g.station.id)
+                .map(p => p.tipo);
+
               return (
                 <div
                   key={g.station.id}
-                  className={`station-card ${i === 0 && hasPrices ? 'cheapest' : ''}`}
+                  className={`station-card ${cheapestFuels.length > 0 && hasPrices ? 'cheapest' : ''}`}
                 >
-                  {i === 0 && hasPrices && (
-                    <div className="cheapest-badge">🏆 MAIS BARATO</div>
+                  {cheapestFuels.length > 0 && hasPrices && (
+                    <div className="cheapest-badge">
+                      🏆 {cheapestFuels.length === 1
+                        ? `${FUEL_ICONS[cheapestFuels[0]] || '⛽'} Menor preço de ${cheapestFuels[0]}`
+                        : `${cheapestFuels.length} combustíveis mais baratos`}
+                    </div>
                   )}
 
                   {/* Cabeçalho do posto */}
@@ -615,9 +663,9 @@ export default function Home() {
                       <div className="price-list">
                         {g.prices.map(p => {
                           const pIsWeb = p.fonte === 'pesquisa web';
-                          const isCheapestPrice = stats.menorPreco > 0 && p.preco === stats.menorPreco;
+                          const isCheapestForType = cheapestByFuel[p.tipo]?.station.id === g.station.id;
                           const isMostExp = stats.maiorPreco > 0 && p.preco === stats.maiorPreco && stats.totalPostos > 1;
-                          const colorClass = pIsWeb ? 'amber' : isCheapestPrice ? 'green' : isMostExp ? 'red' : 'normal';
+                          const colorClass = pIsWeb ? 'amber' : isCheapestForType ? 'green' : isMostExp ? 'red' : 'normal';
                           const fuelIcon = FUEL_ICONS[p.tipo] || '⛽';
                           return (
                             <div key={p.tipo} className="price-row">
