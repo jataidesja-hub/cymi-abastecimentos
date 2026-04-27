@@ -83,9 +83,11 @@ function parseDedura(html: string): { stations: DeduraStation[]; bestPrices: Rec
     'diesel':'Diesel S10','gnv':'GNV',
   };
 
+  const strippedFull = html.replace(/<[^>]+>/g,' ');
+
   for (const [label, tipo] of Object.entries(fuelLabels)) {
     const re = new RegExp(`${label}[\\s\\S]{0,80}?R\\$\\s*([\\d,\\.]+)[\\s\\S]{0,60}?([A-ZÀÁÂÃÉÊÍÓÔÕÚÜÇ][A-ZÀ-Ú\\s&.,\\-]{3,60})`, 'gi');
-    const m = re.exec(html);
+    const m = re.exec(strippedFull);
     if (m && !bestPrices[tipo]) {
       const preco = parseFloat(m[1].replace(',','.'));
       const posto = m[2].trim().replace(/\s+/g,' ');
@@ -111,9 +113,11 @@ function parseDedura(html: string): { stations: DeduraStation[]; bestPrices: Rec
     else if (/\bale\b/i.test(block)) bandeira = 'Ale';
 
     const precos: Record<string,number> = {};
+    const stripped = block.replace(/<[^>]+>/g,' '); // remove todas as tags HTML
     for (const [label, tipo] of Object.entries(fuelLabels)) {
-      const re = new RegExp(`${label}[^R<]{0,30}R\\$\\s*([\\d,\\.]+)`, 'i');
-      const m = block.match(re);
+      if (precos[tipo]) continue;
+      const re = new RegExp(`${label}[\\s\\S]{0,80}?R\\$\\s*([\\d]+[,.]\\d{2,3})`, 'i');
+      const m = stripped.match(re);
       if (m) { const v=parseFloat(m[1].replace(',','.')); if(v>1&&v<20) precos[tipo]=v; }
     }
     stations.push({ nome, endereco, bandeira, precos });
