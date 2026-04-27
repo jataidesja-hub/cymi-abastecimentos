@@ -1,8 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 export const maxDuration = 30;
 
 const ALL_FUELS = ['Gasolina Comum','Gasolina Aditivada','Etanol','Diesel S10','Diesel S500','GNV'];
+
+// ─── ANP: média real da cidade via Supabase ───────────────────────────────────
+async function getAnpCityPrices(municipio: string, estado: string): Promise<Record<string,number>> {
+  try {
+    const url  = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const key  = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!url || !key) return {};
+    const supabase = createClient(url, key);
+    const { data } = await supabase
+      .from('anp_city_prices')
+      .select('produto, preco_medio')
+      .eq('municipio', municipio.toUpperCase().trim())
+      .eq('estado', estado.toLowerCase().trim());
+    if (!data?.length) return {};
+    return Object.fromEntries(data.map((r: any) => [r.produto, r.preco_medio]));
+  } catch { return {}; }
+}
 
 
 
@@ -162,7 +180,12 @@ export async function GET(request: NextRequest) {
 
   if (!uf) return NextResponse.json({ error: 'Cidade não encontrada no Brasil' }, { status: 404 });
 
-  const { stations, bestPrices } = await fetchDedura(cidade, uf);
+  // Busca dedurapreco + ANP municipal em paralelo
+  const [{ stations, bestPrices }, anpPrices] = await Promise.all([
+    fetchDedura(cidade, uf),
+    getAnpCityPrices(cidade, uf),
+  ]);
+
   if (stations.length === 0) return NextResponse.json({ error: 'Nenhum posto encontrado' }, { status: 404 });
 
   const cityCenter = cityInfo || { lat: -14.24, lon: -51.93 };
@@ -208,7 +231,12 @@ export async function GET(request: NextRequest) {
           }
         }
 
-        // Só inclui se tem preço REAL — sem estimativas
+        // Fallback: média real da cidade via ANP (quando disponível)
+        if (!preco && anpPrices[tipo]) {
+          preco = anpPrices[tipo];
+          fonte = 'média ANP da cidade';
+        }
+
         if (preco > 0) {
           entries.push({
             id: `${stationId}-${tipo}`,
