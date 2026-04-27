@@ -22,11 +22,20 @@ function parseDate(raw: string): string | null {
   return null;
 }
 
-// Remove "R$", espaços e troca vírgula por ponto → número
+// Remove "R$", converte formato BR (1.234,56 → 1234.56) → número
 function parseDecimal(raw: string): number | null {
   if (raw == null || raw === '') return null;
-  const cleaned = String(raw).replace(/R\$\s*/g, '').replace(/\./g, '').replace(',', '.').trim();
-  const n = parseFloat(cleaned);
+  let s = String(raw).replace(/R\$\s*/g, '').trim();
+  // Formato BR: ponto como milhar e vírgula como decimal (ex: 1.200,49 ou 7,790)
+  if (/\d+\.\d{3},\d/.test(s)) {
+    // tem ponto de milhar e vírgula decimal: 1.200,49 → 1200.49
+    s = s.replace(/\./g, '').replace(',', '.');
+  } else if (/,/.test(s)) {
+    // só vírgula decimal: 7,790 → 7.790
+    s = s.replace(',', '.');
+  }
+  // caso já esteja com ponto decimal: 7.79
+  const n = parseFloat(s);
   return isNaN(n) ? null : n;
 }
 
@@ -62,28 +71,38 @@ function detectColumns(headers: string[]): Record<string, number> {
   return map;
 }
 
-function parseCSV(text: string): string[][] {
-  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
-  return lines
-    .filter(l => l.trim())
-    .map(line => {
-      const cells: string[] = [];
-      let cur = '';
-      let inQuote = false;
-      for (let i = 0; i < line.length; i++) {
-        const ch = line[i];
-        if (ch === '"') {
-          inQuote = !inQuote;
-        } else if ((ch === ',' || ch === ';') && !inQuote) {
-          cells.push(cur.trim());
-          cur = '';
-        } else {
-          cur += ch;
-        }
-      }
+// Detecta se o CSV usa ; ou , como separador de colunas
+// CSV brasileiro usa ; porque a vírgula é decimal
+function detectDelimiter(headerLine: string): ';' | ',' {
+  const semis = (headerLine.match(/;/g) || []).length;
+  const commas = (headerLine.match(/,/g) || []).length;
+  return semis >= commas ? ';' : ',';
+}
+
+function parseLine(line: string, delimiter: ';' | ','): string[] {
+  const cells: string[] = [];
+  let cur = '';
+  let inQuote = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      inQuote = !inQuote;
+    } else if (ch === delimiter && !inQuote) {
       cells.push(cur.trim());
-      return cells;
-    });
+      cur = '';
+    } else {
+      cur += ch;
+    }
+  }
+  cells.push(cur.trim());
+  return cells;
+}
+
+function parseCSV(text: string): string[][] {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim());
+  if (!lines.length) return [];
+  const delimiter = detectDelimiter(lines[0]);
+  return lines.map(line => parseLine(line, delimiter));
 }
 
 export async function POST(request: NextRequest) {
